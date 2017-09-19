@@ -1,4 +1,5 @@
-[![Build Status](https://travis-ci.org/dedis/cothority_template.svg?branch=master)](https://travis-ci.org/dedis/cothority_template)
+This repository is a clone of the DEDIS [cothority template](https://github.com/dedis/cothority_template).
+It is highly experimental and should not be used unil further notice.
 
 # Template for a new cothority protocol/service/app
 
