@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/dedis/cothority_template"
+	"github.com/nblp/decenarch"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"

@@ -11,8 +11,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/dedis/cothority_template"
-	"github.com/dedis/cothority_template/protocol"
+	"github.com/nblp/decenarch"
+	"github.com/nblp/decenarch/protocol"
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"

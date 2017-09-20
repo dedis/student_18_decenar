@@ -7,7 +7,7 @@ package main
 import (
 	"os"
 
-	template "github.com/dedis/cothority_template"
+	template "github.com/nblp/decenarch"
 
 	"gopkg.in/dedis/onet.v1/app"
 

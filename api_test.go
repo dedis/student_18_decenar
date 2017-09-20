@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	// We need to include the service so it is started.
-	"github.com/dedis/cothority_template"
-	_ "github.com/dedis/cothority_template/service"
+	"github.com/nblp/decenarch"
+	_ "github.com/nblp/decenarch/service"
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
 )
