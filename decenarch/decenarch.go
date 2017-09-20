@@ -17,8 +17,8 @@ import (
 
 func main() {
 	cliApp := cli.NewApp()
-	cliApp.Name = "Template"
-	cliApp.Usage = "Used for building other apps."
+	cliApp.Name = "Decenarch"
+	cliApp.Usage = "retrieve static websites"
 	cliApp.Version = "0.1"
 	groupsDef := "the group-definition-file"
 	cliApp.Commands = []cli.Command{
@@ -32,9 +32,23 @@ func main() {
 		{
 			Name:      "counter",
 			Usage:     "return the counter",
-			Aliases:   []string{"t"},
+			Aliases:   []string{"c"},
 			ArgsUsage: groupsDef,
 			Action:    cmdCounter,
+		},
+		{
+			Name:      "retrieve",
+			Usage:     "retrive the website if saved",
+			Aliases:   []string{"r"},
+			ArgsUsage: groupsDef,
+			Action:    cmdRetrieve,
+		},
+		{
+			Name:      "save",
+			Usage:     "save the website",
+			Aliases:   []string{"s"},
+			ArgsUsage: groupsDef,
+			Action:    cmdSave,
 		},
 	}
 	cliApp.Flags = []cli.Flag{
@@ -45,6 +59,16 @@ func main() {
 		return nil
 	}
 	cliApp.Run(os.Args)
+}
+
+// Returns the asked website if exist.
+func cmdRetrieve(c *cli.Context, url string) error {
+    return nil
+}
+
+// Saves the asked website and returns an exit state
+func cmdSave(c *cli.Context, url string) error {
+    return nil
 }
 
 // Returns the time needed to contact all nodes.
