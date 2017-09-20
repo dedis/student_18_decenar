@@ -15,7 +15,7 @@ import (
 )
 
 // ServiceName is used for registration on the onet.
-const ServiceName = "Template"
+const ServiceName = "Decenarch"
 
 // Client is a structure to communicate with the CoSi
 // service
@@ -49,4 +49,23 @@ func (c *Client) Count(si *network.ServerIdentity) (int, error) {
 		return -1, err
 	}
 	return reply.Count, nil
+}
+
+// Save will record the website requested in the conodes
+func (c *Client) Save(r *onet.Roster, url string) onet.ClientError {
+	dst = r.RandomServerIdentity()
+	log.Lvl4("Sending message to", dst)
+	resp := &SaveResponse{}
+	err := c.SendProtobuf(dst, &SaveRequest{url}, resp)
+	return err
+}
+
+// Retrieve will send the website requested to the client
+func (c *Client) Retrieve(si *network.ServerIdentity, url string) (*RetrieveResponse, onet.ClientError) {
+	resp := &RetrieveResponse{}
+	err := c.SendProtobuf(si, &RetrieveRequest{url}, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
