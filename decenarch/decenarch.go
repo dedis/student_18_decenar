@@ -1,13 +1,9 @@
-/*
-* This is a template for creating an app. It only has one command which
-* prints out the name of the app.
- */
 package main
 
 import (
 	"os"
 
-	template "github.com/nblp/decenarch"
+	decenarch "github.com/nblp/decenarch"
 
 	"gopkg.in/dedis/onet.v1/app"
 
@@ -38,7 +34,7 @@ func main() {
 		},
 		{
 			Name:      "retrieve",
-			Usage:     "retrive the website if saved",
+			Usage:     "retrive the website",
 			Aliases:   []string{"r"},
 			ArgsUsage: groupsDef,
 			Action:    cmdRetrieve,
@@ -61,21 +57,37 @@ func main() {
 	cliApp.Run(os.Args)
 }
 
-// Returns the asked website if exist.
+// Returns the asked website if saved.
 func cmdRetrieve(c *cli.Context, url string) error {
-    return nil
+	log.Info("Retrieve command")
+	group := readGroup(c)
+	client := decenarch.NewClient()
+	resp, err := client.Retrieve(group.Roster.RandomServerIdentity(), url)
+	if err != nil {
+		log.Fatal("When asking to retrieve", url, ":", err)
+	}
+	log.Info("Website", url, "retrieved")
+	return nil
 }
 
 // Saves the asked website and returns an exit state
 func cmdSave(c *cli.Context, url string) error {
-    return nil
+	log.Info("Save command")
+	group := readGroup(c)
+	client := decenarch.NewClient()
+	resp, err := client.Save(group.Roster, url)
+	if err != nil {
+		log.Fatal("When asking to save", url, ":", err)
+	}
+	log.Info("Website", url, "saved.")
+	return nil
 }
 
 // Returns the time needed to contact all nodes.
 func cmdTime(c *cli.Context) error {
 	log.Info("Time command")
 	group := readGroup(c)
-	client := template.NewClient()
+	client := decenarch.NewClient()
 	resp, err := client.Clock(group.Roster)
 	if err != nil {
 		log.Fatal("When asking the time:", err)
@@ -88,7 +100,7 @@ func cmdTime(c *cli.Context) error {
 func cmdCounter(c *cli.Context) error {
 	log.Info("Counter command")
 	group := readGroup(c)
-	client := template.NewClient()
+	client := decenarch.NewClient()
 	counter, err := client.Count(group.Roster.RandomServerIdentity())
 	if err != nil {
 		log.Fatal("When asking for counter:", err)
