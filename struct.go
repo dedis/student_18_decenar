@@ -50,7 +50,8 @@ type CountResponse struct {
 // SaveRequest will save the website in the conodes using the protocol and
 // return the exit state of the saving process
 type SaveRequest struct {
-	Url string
+	Url    string
+	Roster *onet.Roster
 }
 
 // SaveResponse return an error if the website could not be saved correctly
@@ -65,6 +66,5 @@ type RetrieveRequest struct {
 
 // RetrieveResponse return the website file requested
 type RetrieveResponse struct {
-	//TODO Define Website storage format
-	Website []byte
+	Website string
 }

@@ -58,7 +58,7 @@ func main() {
 }
 
 // Returns the asked website if saved.
-func cmdRetrieve(c *cli.Context, url string) error {
+func cmdRetrieve(c *cli.Context, url string) (string, error) {
 	log.Info("Retrieve command")
 	group := readGroup(c)
 	client := decenarch.NewClient()
@@ -67,7 +67,7 @@ func cmdRetrieve(c *cli.Context, url string) error {
 		log.Fatal("When asking to retrieve", url, ":", err)
 	}
 	log.Info("Website", url, "retrieved")
-	return nil
+	return resp.Website, nil
 }
 
 // Saves the asked website and returns an exit state
@@ -75,7 +75,7 @@ func cmdSave(c *cli.Context, url string) error {
 	log.Info("Save command")
 	group := readGroup(c)
 	client := decenarch.NewClient()
-	resp, err := client.Save(group.Roster, url)
+	err := client.Save(group.Roster, url)
 	if err != nil {
 		log.Fatal("When asking to save", url, ":", err)
 	}

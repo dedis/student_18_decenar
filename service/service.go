@@ -35,6 +35,9 @@ type Service struct {
 	*onet.ServiceProcessor
 
 	storage *storage
+
+	// websites archive
+	webarchive map[string]webstore
 }
 
 // storageID reflects the data we're storing - we could store more
@@ -45,6 +48,33 @@ const storageID = "main"
 type storage struct {
 	Count int
 	sync.Mutex
+}
+
+// webstore is used to store website
+type webstore struct {
+	sync.Mutex
+	Hash          uint64
+	IndexHtmlPath string
+	Url           string
+}
+
+// SaveRequest
+func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse, onet.ClientError) {
+	// operations done in service layer
+	web := s.webarchive[req.Url]
+	// operations done in protocol layer
+	return nil
+}
+
+// RetrieveRequest
+func (s *Service) RetriveRequest(req *template.RetriveRequest) (*template.RetrieveResponse, onet.ClientError) {
+	if web, isSaved := s.webarchive[req.Url]; isSaved {
+		web.Lock()
+		defer web.Unlock()
+		return &template.RetrieveResponse{Website: web.IndexHtmlPathi}, nil
+	} else {
+		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
+	}
 }
 
 // ClockRequest starts a template-protocol and returns the run-time.

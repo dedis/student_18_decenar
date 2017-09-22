@@ -53,10 +53,10 @@ func (c *Client) Count(si *network.ServerIdentity) (int, error) {
 
 // Save will record the website requested in the conodes
 func (c *Client) Save(r *onet.Roster, url string) onet.ClientError {
-	dst = r.RandomServerIdentity()
+	dst := r.RandomServerIdentity()
 	log.Lvl4("Sending message to", dst)
 	resp := &SaveResponse{}
-	err := c.SendProtobuf(dst, &SaveRequest{url}, resp)
+	err := c.SendProtobuf(dst, &SaveRequest{url, r}, resp)
 	return err
 }
 
