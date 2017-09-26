@@ -9,13 +9,17 @@ import (
 	"time"
 
 	"errors"
+	"net/http"
 	"sync"
 
 	"github.com/nblp/decenarch"
 	"github.com/nblp/decenarch/protocol"
+
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Used for tests
@@ -35,9 +39,6 @@ type Service struct {
 	*onet.ServiceProcessor
 
 	storage *storage
-
-	// websites archive
-	webarchive map[string]webstore
 }
 
 // storageID reflects the data we're storing - we could store more
@@ -46,32 +47,52 @@ const storageID = "main"
 
 // storage is used to save our data.
 type storage struct {
-	Count int
+	Count      int
+	webarchive map[string]webstore
+
 	sync.Mutex
 }
 
 // webstore is used to store website
 type webstore struct {
-	sync.Mutex
-	Hash          uint64
-	IndexHtmlPath string
-	Url           string
+	Hash []byte
+	Url  string
 }
 
 // SaveRequest
 func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse, onet.ClientError) {
-	// operations done in service layer
-	web := s.webarchive[req.Url]
-	// operations done in protocol layer
-	return nil
+	// start save protocol
+	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
+	if tree == nil {
+		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
+	}
+	pi, err := s.CreateProtocol(protocol.Name, tree)
+	if err != nill {
+		return nil, ont.NewClientErrorCode(err)
+	}
+	pi.Start()
+	resp := &template.SaveResponse{}
+	// record website in saved website index
+	url := req.Url
+	hash := GenerateFromPassword([]byte(url), 30)
+	web := webstore{
+		Hash: hash,
+		Url:  url,
+	}
+	s.storage.Lock()
+	s.storage.webarchive[url] = web
+	s.storage.Unlock()
+	s.save()
+	return resp, nil
 }
 
 // RetrieveRequest
-func (s *Service) RetriveRequest(req *template.RetriveRequest) (*template.RetrieveResponse, onet.ClientError) {
+func (s *Service) RetriveRequest(req *template.RetrieveRequest) (*template.RetrieveResponse, onet.ClientError) {
 	if web, isSaved := s.webarchive[req.Url]; isSaved {
 		web.Lock()
 		defer web.Unlock()
-		return &template.RetrieveResponse{Website: web.IndexHtmlPathi}, nil
+		//TODO need to send File or []byte + all needed data
+		return &template.RetrieveResponse{Website: web.IndexHtmlPath}, nil
 	} else {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
 	}
