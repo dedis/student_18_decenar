@@ -136,8 +136,10 @@ func (s *Service) CountRequest(req *template.CountRequest) (*template.CountRespo
 // instantiation of the protocol, use CreateProtocolService, and you can
 // give some extra-configuration to your protocol in here.
 func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
-	log.Lvl3("Not templated yet")
-	return nil, nil
+	log.Lvl3("Decenarch Service new protocol event")
+	pi, err := template.NewProtocol(tn)
+	//TODO pass url to sub protocol
+	return pi, err
 }
 
 // saves all skipblocks.
