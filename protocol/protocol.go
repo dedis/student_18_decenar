@@ -12,7 +12,6 @@ node will only use the `Handle`-methods, and not call `Start` again.
 
 import (
 	"errors"
-	"sync"
 
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
@@ -32,12 +31,7 @@ type Template struct {
 	*onet.TreeNodeInstance
 	Message    string
 	ChildCount chan int
-}
-
-type Save struct {
-	*onet.TreeNodeInstance
-	Message string
-	Web     webstore
+	Url        string
 }
 
 // NewProtocol initialises the structure for use in one round
