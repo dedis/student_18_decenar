@@ -66,10 +66,17 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
 	}
-	pi, err := s.CreateProtocol(protocol.Name, tree)
-	if err != nill {
-		return nil, ont.NewClientErrorCode(err)
+	//TODO pass url to conode
+	//pi, err := s.CreateProtocol(protocol.Name, tree)
+	//if err != nill {
+	//	return nil, ont.NewClientErrorCode(err)
+	//}
+	pi, err := service.NewProtocol(tree)
+	pi.Url = req.Url
+	if err != nil {
+		return nil, onet.NewClientErrorCode(err)
 	}
+
 	pi.Start()
 	resp := &template.SaveResponse{}
 	// record website in saved website index
@@ -137,8 +144,12 @@ func (s *Service) CountRequest(req *template.CountRequest) (*template.CountRespo
 // give some extra-configuration to your protocol in here.
 func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
 	log.Lvl3("Decenarch Service new protocol event")
-	pi, err := template.NewProtocol(tn)
-	//TODO pass url to sub protocol
+	pi, err := protocol.NewProtocol(tn)
+	if err != nil {
+		return nil, err
+	}
+
+	s.RegisterProtocolInstance(pi)
 	return pi, err
 }
 
