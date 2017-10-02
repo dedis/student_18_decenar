@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"errors"
-	"net/http"
 	"sync"
 
 	"github.com/nblp/decenarch"
@@ -74,14 +73,14 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 	pi, err := service.NewProtocol(tree)
 	pi.Url = req.Url
 	if err != nil {
-		return nil, onet.NewClientErrorCode(err)
+		return nil, onet.NewClientErrorCode(4042, err)
 	}
 
 	pi.Start()
 	resp := &template.SaveResponse{}
 	// record website in saved website index
 	url := req.Url
-	hash := GenerateFromPassword([]byte(url), 30)
+	hash := bcrypt.GenerateFromPassword([]byte(url), 30)
 	web := webstore{
 		Hash: hash,
 		Url:  url,
@@ -95,9 +94,9 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 
 // RetrieveRequest
 func (s *Service) RetriveRequest(req *template.RetrieveRequest) (*template.RetrieveResponse, onet.ClientError) {
-	if web, isSaved := s.webarchive[req.Url]; isSaved {
-		web.Lock()
-		defer web.Unlock()
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	if web, isSaved := s.storagewebarchive[req.Url]; isSaved {
 		//TODO need to send File or []byte + all needed data
 		return &template.RetrieveResponse{Website: web.IndexHtmlPath}, nil
 	} else {
