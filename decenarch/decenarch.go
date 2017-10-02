@@ -12,8 +12,9 @@ import (
 )
 
 func main() {
+	log.Info("Start decenarch application")
 	cliApp := cli.NewApp()
-	cliApp.Name = "Decenarch"
+	cliApp.Name = "decenarch"
 	cliApp.Usage = "retrieve static websites"
 	cliApp.Version = "0.1"
 	groupsDef := "the group-definition-file"
@@ -38,6 +39,12 @@ func main() {
 			Aliases:   []string{"r"},
 			ArgsUsage: groupsDef,
 			Action:    cmdRetrieve,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "url, u",
+					Usage: "Provide url to retrieve",
+				},
+			},
 		},
 		{
 			Name:      "save",
@@ -45,6 +52,19 @@ func main() {
 			Aliases:   []string{"s"},
 			ArgsUsage: groupsDef,
 			Action:    cmdSave,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "url, u",
+					Usage: "Provide url to save",
+				},
+			},
+		},
+		{
+			Name:      "dummy",
+			Usage:     "dummy new command",
+			Aliases:   []string{"d"},
+			ArgsUsage: groupsDef,
+			Action:    dummy,
 		},
 	}
 	cliApp.Flags = []cli.Flag{
@@ -57,9 +77,17 @@ func main() {
 	cliApp.Run(os.Args)
 }
 
+func dummy(c *cli.Context) {
+	log.Info("Dummy Command")
+}
+
 // Returns the asked website if saved.
-func cmdRetrieve(c *cli.Context, url string) (string, error) {
+func cmdRetrieve(c *cli.Context) (string, error) {
 	log.Info("Retrieve command")
+	url := c.String("url")
+	if url == "" {
+		log.Fatal("Please provide an url.")
+	}
 	group := readGroup(c)
 	client := decenarch.NewClient()
 	resp, err := client.Retrieve(group.Roster.RandomServerIdentity(), url)
@@ -71,8 +99,12 @@ func cmdRetrieve(c *cli.Context, url string) (string, error) {
 }
 
 // Saves the asked website and returns an exit state
-func cmdSave(c *cli.Context, url string) error {
+func cmdSave(c *cli.Context) error {
 	log.Info("Save command")
+	url := c.String("url")
+	if url == "" {
+		log.Fatal("Please provide an url.")
+	}
 	group := readGroup(c)
 	client := decenarch.NewClient()
 	err := client.Save(group.Roster, url)
