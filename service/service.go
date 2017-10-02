@@ -60,27 +60,32 @@ type webstore struct {
 
 // SaveRequest
 func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse, onet.ClientError) {
+	log.Lvl3("Decenarch Service new SaveRequest")
 	// start save protocol
 	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
 	}
 	//TODO pass url to conode
-	//pi, err := s.CreateProtocol(protocol.Name, tree)
-	//if err != nill {
-	//	return nil, ont.NewClientErrorCode(err)
-	//}
-	pi, err := service.NewProtocol(tree)
-	pi.Url = req.Url
+	pi, err := s.CreateProtocol(protocol.Name, tree)
 	if err != nil {
-		return nil, onet.NewClientErrorCode(4042, err)
+		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
+	pi.(*protocol.Template).Url = req.Url
+	//localConf := onet.GenericConfig{Data: []byte(req.Url)}
+	//pi, err := s.NewProtocol(tree, &localConf)
+	//if err != nil {
+	//	return nil, onet.NewClientErrorCode(4042, err.Error())
+	//}
 
 	pi.Start()
 	resp := &template.SaveResponse{}
 	// record website in saved website index
 	url := req.Url
-	hash := bcrypt.GenerateFromPassword([]byte(url), 30)
+	hash, err_hash := bcrypt.GenerateFromPassword([]byte(url), 30)
+	if err_hash != nil {
+		return nil, onet.NewClientErrorCode(4042, err_hash.Error())
+	}
 	web := webstore{
 		Hash: hash,
 		Url:  url,
@@ -93,12 +98,13 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 }
 
 // RetrieveRequest
-func (s *Service) RetriveRequest(req *template.RetrieveRequest) (*template.RetrieveResponse, onet.ClientError) {
+func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.RetrieveResponse, onet.ClientError) {
+	log.Lvl3("Decenarch Service new RetriveRequest")
 	s.storage.Lock()
 	defer s.storage.Unlock()
-	if web, isSaved := s.storagewebarchive[req.Url]; isSaved {
+	if web, isSaved := s.storage.webarchive[req.Url]; isSaved {
 		//TODO need to send File or []byte + all needed data
-		return &template.RetrieveResponse{Website: web.IndexHtmlPath}, nil
+		return &template.RetrieveResponse{Website: web.Url}, nil
 	} else {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
 	}
@@ -106,6 +112,7 @@ func (s *Service) RetriveRequest(req *template.RetrieveRequest) (*template.Retri
 
 // ClockRequest starts a template-protocol and returns the run-time.
 func (s *Service) ClockRequest(req *template.ClockRequest) (*template.ClockResponse, onet.ClientError) {
+	log.Lvl3("Decenarch Service new ClockRequest")
 	s.storage.Lock()
 	s.storage.Count++
 	s.storage.Unlock()
@@ -129,6 +136,7 @@ func (s *Service) ClockRequest(req *template.ClockRequest) (*template.ClockRespo
 
 // CountRequest returns the number of instantiations of the protocol.
 func (s *Service) CountRequest(req *template.CountRequest) (*template.CountResponse, onet.ClientError) {
+	log.Lvl3("Decenarch Service new CountRequest")
 	s.storage.Lock()
 	defer s.storage.Unlock()
 	return &template.CountResponse{Count: s.storage.Count}, nil
@@ -141,15 +149,19 @@ func (s *Service) CountRequest(req *template.CountRequest) (*template.CountRespo
 // instantiate the protocol on its own. If you need more control at the
 // instantiation of the protocol, use CreateProtocolService, and you can
 // give some extra-configuration to your protocol in here.
+// Note: As soon as it returns anything other than (nil, nil) it is used to
+// create new protocols
 func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
 	log.Lvl3("Decenarch Service new protocol event")
-	pi, err := protocol.NewProtocol(tn)
-	if err != nil {
-		return nil, err
-	}
+	return nil, nil
+	//pi, err := protocol.NewProtocol(tn)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//pi.(*protocol.Template).Url = string(conf.Data)
 
-	s.RegisterProtocolInstance(pi)
-	return pi, err
+	////s.RegisterProtocolInstance(pi)
+	//return pi, err
 }
 
 // saves all skipblocks.
@@ -188,7 +200,7 @@ func newService(c *onet.Context) onet.Service {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
 	}
-	if err := s.RegisterHandlers(s.ClockRequest, s.CountRequest); err != nil {
+	if err := s.RegisterHandlers(s.ClockRequest, s.CountRequest, s.SaveRequest, s.RetrieveRequest); err != nil {
 		log.ErrFatal(err, "Couldn't register messages")
 	}
 	if err := s.tryLoad(); err != nil {
