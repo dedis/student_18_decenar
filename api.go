@@ -52,12 +52,15 @@ func (c *Client) Count(si *network.ServerIdentity) (int, error) {
 }
 
 // Save will record the website requested in the conodes
-func (c *Client) Save(r *onet.Roster, url string) onet.ClientError {
+func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientError) {
 	dst := r.RandomServerIdentity()
 	log.Lvl4("Sending message to", dst)
 	resp := &SaveResponse{}
 	err := c.SendProtobuf(dst, &SaveRequest{url, r}, resp)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // Retrieve will send the website requested to the client

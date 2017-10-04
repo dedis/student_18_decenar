@@ -10,7 +10,7 @@ so that it can find out who sent the message.
 import "gopkg.in/dedis/onet.v1"
 
 // Name can be used from other packages to refer to this protocol.
-const Name = "Template"
+const Name = "Decenarch"
 
 // Announce is used to pass a message to all children.
 type Announce struct {
@@ -34,4 +34,34 @@ type Reply struct {
 type StructReply struct {
 	*onet.TreeNode
 	Reply
+}
+
+// ***************** Struct for DecenarchSave ****************************** //
+
+// SaveAnnounce is used to pass a message to all children when the protocol
+// called is DecenarchSave
+type SaveAnnounce struct {
+	Hash []byte
+	Url  string
+}
+
+// StructSaveAnnounce just contains SaveAnnounce and the data necessary to
+// identify and process the message in the sda framework.
+type StructSaveAnnounce struct {
+	*onet.TreeNode
+	SaveAnnounce
+}
+
+// SaveReply returns the Hash computed by the children of the website and the
+// errors that happens
+type SaveReply struct {
+	Hash []byte
+	Errs []error
+}
+
+// StructSaveReply just contains StructSaveReply and the data necessary to
+// identify and process the message in the sda framework.
+type StructSaveReply struct {
+	*onet.TreeNode
+	SaveReply
 }

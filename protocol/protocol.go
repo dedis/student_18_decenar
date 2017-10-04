@@ -31,7 +31,7 @@ type Template struct {
 	*onet.TreeNodeInstance
 	Message    string
 	ChildCount chan int
-	Url        string
+	Url        chan string
 }
 
 // NewProtocol initialises the structure for use in one round
@@ -39,6 +39,7 @@ func NewProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	t := &Template{
 		TreeNodeInstance: n,
 		ChildCount:       make(chan int),
+		Url:              make(chan string),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -58,6 +59,7 @@ func (p *Template) Start() error {
 // HandleAnnounce is the first message and is used to send an ID that
 // is stored in all nodes.
 func (p *Template) HandleAnnounce(msg StructAnnounce) error {
+	log.Lvl4("Handling", p)
 	p.Message = msg.Message
 	if !p.IsLeaf() {
 		// If we have children, send the same message to all of them

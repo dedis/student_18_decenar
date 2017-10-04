@@ -66,21 +66,17 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
 	}
-	//TODO pass url to conode
-	pi, err := s.CreateProtocol(protocol.Name, tree)
+	pi, err := s.CreateProtocol("DecenarchSave", tree)
 	if err != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
-	pi.(*protocol.Template).Url = req.Url
-	//localConf := onet.GenericConfig{Data: []byte(req.Url)}
-	//pi, err := s.NewProtocol(tree, &localConf)
-	//if err != nil {
-	//	return nil, onet.NewClientErrorCode(4042, err.Error())
-	//}
-
+	log.Lvl5("Write Url in SaveMessage channel")
+	pi.(*protocol.SaveMessage).Url = req.Url
+	log.Lvl5("Start Protocol")
 	pi.Start()
 	resp := &template.SaveResponse{}
 	// record website in saved website index
+	log.Lvl4("Acknowledge the archiving process in service level")
 	url := req.Url
 	hash, err_hash := bcrypt.GenerateFromPassword([]byte(url), 30)
 	if err_hash != nil {
@@ -149,19 +145,21 @@ func (s *Service) CountRequest(req *template.CountRequest) (*template.CountRespo
 // instantiate the protocol on its own. If you need more control at the
 // instantiation of the protocol, use CreateProtocolService, and you can
 // give some extra-configuration to your protocol in here.
-// Note: As soon as it returns anything other than (nil, nil) it is used to
-// create new protocols
 func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
-	log.Lvl3("Decenarch Service new protocol event")
-	return nil, nil
-	//pi, err := protocol.NewProtocol(tn)
-	//if err != nil {
-	//	return nil, err
+	//log.Lvl3("Decenarch Service new protocol event")
+	//t := &protocol.SaveMessage{
+	//	TreeNodeInstance: tn,
+	//	Url:              make(chan string),
+	//	Errs:             make(chan []error),
 	//}
-	//pi.(*protocol.Template).Url = string(conf.Data)
-
-	////s.RegisterProtocolInstance(pi)
-	//return pi, err
+	//t.Url <- ""
+	//for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
+	//	if err := t.RegisterHandler(handler); err != nil {
+	//		return nil, errors.New("couldn't register handler: " + err.Error())
+	//	}
+	//}
+	//return t, nil
+	return nil, nil
 }
 
 // saves all skipblocks.

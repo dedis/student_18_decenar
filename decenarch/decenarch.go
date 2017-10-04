@@ -107,11 +107,11 @@ func cmdSave(c *cli.Context) error {
 	}
 	group := readGroup(c)
 	client := decenarch.NewClient()
-	err := client.Save(group.Roster, url)
+	resp, err := client.Save(group.Roster, url)
 	if err != nil {
 		log.Fatal("When asking to save", url, ":", err)
 	}
-	log.Info("Website", url, "saved.")
+	log.Info("Website", url, "saved.", resp)
 	return nil
 }
 
