@@ -30,7 +30,7 @@ import (
 func init() {
 	network.RegisterMessage(SaveAnnounce{})
 	network.RegisterMessage(SaveReply{})
-	onet.GlobalProtocolRegister("DecenarchSave", NewSaveProtocol)
+	onet.GlobalProtocolRegister(SaveName, NewSaveProtocol)
 }
 
 // Template just holds a message that is passed to all children. It
@@ -41,6 +41,7 @@ type SaveMessage struct {
 	Url     string
 	Errs    []error
 	ChanUrl chan string
+	RealUrl chan string
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -50,6 +51,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		TreeNodeInstance: n,
 		Url:              "",
 		ChanUrl:          make(chan string),
+		RealUrl:          make(chan string),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -177,10 +179,10 @@ func CreateParentFileHierarchy(pUrl *url.URL) (string, string) {
 func SaveFile(path string, data io.Reader) error {
 	log.Lvl4("Saving", path)
 	creaFile, creaErr := os.Create(path)
-	defer creaFile.Close()
 	if creaErr != nil {
 		return creaErr
 	}
+	defer creaFile.Close()
 	_, copyErr := io.Copy(creaFile, data)
 	if copyErr != nil {
 		return copyErr
@@ -219,6 +221,7 @@ func (p *SaveMessage) SaveUrl(urlToSave string) error {
 	}
 	defer getResp.Body.Close()
 	urlStruct, urlErr := url.Parse(getResp.Request.URL.String())
+	p.RealUrl <- getResp.Request.URL.String() //ANTONAUSTYROLL
 	if urlErr != nil {
 		return urlErr
 	}

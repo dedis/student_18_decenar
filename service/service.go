@@ -59,12 +59,12 @@ type webstore struct {
 }
 
 // StoreWebArchive add the saved url to the service's list of saved website
-func StoreWebArchive(s *Service, url string) {
-	log.Lvl4("Store", url, "as archived website")
+func StoreWebArchive(s *Service, url string, realUrl string) {
+	log.Lvl4("Store", url, "as archived website with realUrl", realUrl)
 	hash := []byte{byte(0)}
 	web := webstore{
 		Hash: hash,
-		Url:  url,
+		Url:  realUrl,
 	}
 	s.storage.Lock()
 	if s.storage.webarchive == nil {
@@ -82,14 +82,17 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
 	}
-	pi, err := s.CreateProtocol("DecenarchSave", tree)
+	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
 	pi.(*protocol.SaveMessage).Url = req.Url
+	go func() {
+		realUrl := <-pi.(*protocol.SaveMessage).RealUrl
+		StoreWebArchive(s, req.Url, realUrl)
+	}()
 	pi.Start()
 	resp := &template.SaveResponse{}
-	StoreWebArchive(s, req.Url)
 	return resp, nil
 }
 
@@ -99,8 +102,20 @@ func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.Retr
 	s.storage.Lock()
 	defer s.storage.Unlock()
 	if web, isSaved := s.storage.webarchive[req.Url]; isSaved {
-		//TODO need to send File or []byte + all needed data
-		return &template.RetrieveResponse{Website: web.Url}, nil
+		//TODO do the protocol; do a barrel roll
+		tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
+		if tree == nil {
+			return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
+		}
+		pi, err := s.CreateProtocol(protocol.RetrieveName, nil)
+		if err != nil {
+			return nil, onet.NewClientErrorCode(4043, err.Error())
+		}
+		pi.(*protocol.RetrieveMessage).Url = web.Url
+		go pi.Start()
+		website := <-pi.(*protocol.RetrieveMessage).ParentPath
+		data := <-pi.(*protocol.RetrieveMessage).Data
+		return &template.RetrieveResponse{Website: website, Data: data}, nil
 	} else {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
 	}
@@ -149,8 +164,9 @@ func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfi
 	log.Lvl3("Decenarch Service new protocol event")
 	pi, err := protocol.NewSaveProtocol(tn)
 	go func() {
+		realUrl := <-pi.(*protocol.SaveMessage).RealUrl
 		saveUrl := <-pi.(*protocol.SaveMessage).ChanUrl
-		StoreWebArchive(s, saveUrl)
+		StoreWebArchive(s, saveUrl, realUrl)
 	}()
 	return pi, err
 }

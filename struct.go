@@ -24,6 +24,8 @@ func init() {
 const (
 	// ErrorParse indicates an error while parsing the protobuf-file.
 	ErrorParse = iota + 4000
+	// CachePath indicates where to cache retrieved websites
+	CachePath = "/tmp/cocache"
 )
 
 // ClockRequest will run the tepmlate-protocol on the roster and return
@@ -61,10 +63,16 @@ type SaveResponse struct {
 // RetrieveRequest will retreive the website from the conode using the protocol
 // and return the website file
 type RetrieveRequest struct {
-	Url string
+	Url    string
+	Roster *onet.Roster
 }
 
-// RetrieveResponse return the website file requested
+// RetrieveResponse return the website requested.
+// @Data is the map containing the raw data of the website. The key is the
+// path to the page in the cache.
+// @Website is the path in the cache to the requested page. It MUST BE a valid
+// key of Data
 type RetrieveResponse struct {
 	Website string
+	Data    map[string][]byte
 }

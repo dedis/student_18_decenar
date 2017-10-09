@@ -11,6 +11,8 @@ import "gopkg.in/dedis/onet.v1"
 
 // Name can be used from other packages to refer to this protocol.
 const Name = "Decenarch"
+const SaveName = "DecenarchSave"
+const RetrieveName = "DecenarchRetrieve"
 
 // Announce is used to pass a message to all children.
 type Announce struct {
@@ -64,4 +66,33 @@ type SaveReply struct {
 type StructSaveReply struct {
 	*onet.TreeNode
 	SaveReply
+}
+
+// ***************** Struct for DecenarchRetrieve ************************** //
+
+// RetrieveAnnounce is used to pass a message to the children when the protocol
+// called is DecenarchRetrieve
+type RetrieveAnnounce struct {
+	PrimaryPath    string
+	SecondaryPaths []string
+}
+
+// StructRetrieveAnnounce just contains RetrieveAnnounce and the data necessary
+// to identify and process the message in the sda framework
+type StructRetrieveAnnounce struct {
+	*onet.TreeNode
+	RetrieveAnnounce
+}
+
+// RetrieveReply return the data of the requested webpage. The key of the map
+// is the path that must be used to save the file in the cache.
+type RetrieveReply struct {
+	Data map[string][]byte
+}
+
+// StructRetrieveReply just contains RetrieveReply and the data necessary
+// to identify and process the message in the sda framework
+type StructRetrieveReply struct {
+	*onet.TreeNode
+	RetrieveReply
 }
