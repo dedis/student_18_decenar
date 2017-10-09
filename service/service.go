@@ -17,9 +17,9 @@ import (
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"
-
-	"golang.org/x/crypto/bcrypt"
 )
+
+//"golang.org/x/crypto/bcrypt"
 
 // Used for tests
 var templateID onet.ServiceID
@@ -58,10 +58,26 @@ type webstore struct {
 	Url  string
 }
 
+// StoreWebArchive add the saved url to the service's list of saved website
+func StoreWebArchive(s *Service, url string) {
+	log.Lvl4("Store", url, "as archived website")
+	hash := []byte{byte(0)}
+	web := webstore{
+		Hash: hash,
+		Url:  url,
+	}
+	s.storage.Lock()
+	if s.storage.webarchive == nil {
+		s.storage.webarchive = make(map[string]webstore)
+	}
+	s.storage.webarchive[url] = web
+	s.storage.Unlock()
+	s.save()
+}
+
 // SaveRequest
 func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new SaveRequest")
-	// start save protocol
 	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
@@ -70,26 +86,10 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 	if err != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
-	log.Lvl5("Write Url in SaveMessage channel")
 	pi.(*protocol.SaveMessage).Url = req.Url
-	log.Lvl5("Start Protocol")
 	pi.Start()
 	resp := &template.SaveResponse{}
-	// record website in saved website index
-	log.Lvl4("Acknowledge the archiving process in service level")
-	url := req.Url
-	hash, err_hash := bcrypt.GenerateFromPassword([]byte(url), 30)
-	if err_hash != nil {
-		return nil, onet.NewClientErrorCode(4042, err_hash.Error())
-	}
-	web := webstore{
-		Hash: hash,
-		Url:  url,
-	}
-	s.storage.Lock()
-	s.storage.webarchive[url] = web
-	s.storage.Unlock()
-	s.save()
+	StoreWebArchive(s, req.Url)
 	return resp, nil
 }
 
@@ -146,20 +146,13 @@ func (s *Service) CountRequest(req *template.CountRequest) (*template.CountRespo
 // instantiation of the protocol, use CreateProtocolService, and you can
 // give some extra-configuration to your protocol in here.
 func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
-	//log.Lvl3("Decenarch Service new protocol event")
-	//t := &protocol.SaveMessage{
-	//	TreeNodeInstance: tn,
-	//	Url:              make(chan string),
-	//	Errs:             make(chan []error),
-	//}
-	//t.Url <- ""
-	//for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
-	//	if err := t.RegisterHandler(handler); err != nil {
-	//		return nil, errors.New("couldn't register handler: " + err.Error())
-	//	}
-	//}
-	//return t, nil
-	return nil, nil
+	log.Lvl3("Decenarch Service new protocol event")
+	pi, err := protocol.NewSaveProtocol(tn)
+	go func() {
+		saveUrl := <-pi.(*protocol.SaveMessage).ChanUrl
+		StoreWebArchive(s, saveUrl)
+	}()
+	return pi, err
 }
 
 // saves all skipblocks.

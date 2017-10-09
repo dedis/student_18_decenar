@@ -38,8 +38,9 @@ func init() {
 // root-node will write to the channel.
 type SaveMessage struct {
 	*onet.TreeNodeInstance
-	Url  string
-	Errs chan []error
+	Url     string
+	Errs    []error
+	ChanUrl chan string
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -48,7 +49,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	t := &SaveMessage{
 		TreeNodeInstance: n,
 		Url:              "",
-		Errs:             make(chan []error),
+		ChanUrl:          make(chan string),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -61,9 +62,10 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 // Start sends the Announce-message to all children
 func (p *SaveMessage) Start() error {
 	log.Lvl3("Starting SaveMessage")
+	saveUrl := p.Url
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
-		SaveAnnounce{Url: p.Url, Hash: []byte{byte(0)}},
+		SaveAnnounce{Url: saveUrl, Hash: []byte{byte(0)}},
 	})
 }
 
@@ -72,7 +74,7 @@ func (p *SaveMessage) Start() error {
 func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 	log.Lvl4("Handling", p)
 	p.Url = msg.SaveAnnounce.Url
-	err := p.SaveUrl()
+	err := p.SaveUrl(msg.SaveAnnounce.Url)
 	if err != nil {
 		urlFail := msg.SaveAnnounce.Url
 		log.Lvl1("Impossible to save", urlFail, ":", err)
@@ -81,6 +83,7 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 		// If we have children, send the same message to all of them
 		p.SendToChildren(&msg.SaveAnnounce)
 	} else {
+		p.ChanUrl <- msg.SaveAnnounce.Url
 		// If we're the leaf, start to reply
 		resp := StructSaveReply{
 			p.TreeNode(),
@@ -107,8 +110,8 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 		log.Lvl3("Sending to parent")
 		return p.SendTo(p.Parent(), &SaveReply{Hash: []byte{byte(0)}, Errs: AllErrs})
 	}
+	p.Errs = AllErrs
 	log.Lvl3("Root-node is done")
-	p.Errs <- AllErrs
 	return nil
 }
 
@@ -208,14 +211,13 @@ func GetAdditionalRessource(parentUrl *url.URL, link string) (*http.Response, er
 }
 
 // SaveUrl is the function called when a SaveRequest is received.
-func (p *SaveMessage) SaveUrl() error {
+func (p *SaveMessage) SaveUrl(urlToSave string) error {
 	log.Lvl4("Saving website on system")
-	urlToSave := p.Url
 	getResp, getErr := http.Get(urlToSave)
-	defer getResp.Body.Close()
 	if getErr != nil {
 		return getErr
 	}
+	defer getResp.Body.Close()
 	urlStruct, urlErr := url.Parse(getResp.Request.URL.String())
 	if urlErr != nil {
 		return urlErr
