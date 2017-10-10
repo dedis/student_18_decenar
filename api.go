@@ -64,9 +64,10 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientErr
 }
 
 // Retrieve will send the website requested to the client
-func (c *Client) Retrieve(si *network.ServerIdentity, url string) (*RetrieveResponse, onet.ClientError) {
+func (c *Client) Retrieve(r *onet.Roster, url string) (*RetrieveResponse, onet.ClientError) {
 	resp := &RetrieveResponse{}
-	err := c.SendProtobuf(si, &RetrieveRequest{url}, resp)
+	dst := r.RandomServerIdentity()
+	err := c.SendProtobuf(dst, &RetrieveRequest{Roster: r, Url: url}, resp)
 	if err != nil {
 		return nil, err
 	}

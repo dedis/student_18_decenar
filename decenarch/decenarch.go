@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
+	"path/filepath"
 
 	decenarch "github.com/nblp/decenarch"
 
@@ -81,21 +84,53 @@ func dummy(c *cli.Context) {
 	log.Info("Dummy Command")
 }
 
+// cacheData save data on file system using the path provided
+func cacheData(path string, data []byte) error {
+	mErr := os.MkdirAll(filepath.Dir(path), os.ModePerm|os.ModeDir)
+	if mErr != nil {
+		log.Lvl3("Error while creating folders for", path)
+		return mErr
+	}
+	file, fErr := os.Create(path)
+	if fErr != nil {
+		log.Lvl3("Error while create file", path)
+		return fErr
+	}
+	defer file.Close()
+	_, cErr := io.Copy(file, bytes.NewReader(data))
+	if cErr != nil {
+		log.Lvl3("Error while copying data in", path)
+		return cErr
+	}
+	return nil
+}
+
 // Returns the asked website if saved.
-func cmdRetrieve(c *cli.Context) (string, error) {
+func cmdRetrieve(c *cli.Context) error {
 	log.Info("Retrieve command")
 	url := c.String("url")
 	if url == "" {
-		log.Fatal("Please provide an url.")
+		log.Fatal("Please provide an url with save -u [url] ")
 	}
 	group := readGroup(c)
 	client := decenarch.NewClient()
-	resp, err := client.Retrieve(group.Roster.RandomServerIdentity(), url)
+	resp, err := client.Retrieve(group.Roster, url)
 	if err != nil {
 		log.Fatal("When asking to retrieve", url, ":", err)
 	}
-	log.Info("Website", url, "retrieved")
-	return resp.Website, nil
+	// save the website in filesystem's cache
+	prefix := decenarch.CachePath
+	for path, data := range resp.Data {
+		if string(path[0]) != "/" {
+			prefix += "/"
+		}
+		err := cacheData(prefix+path, data)
+		if err != nil {
+			log.Lvl3("Impossible to cache", path, ":", err)
+		}
+	}
+	log.Info("Website", url, "retrieved in", resp.Website)
+	return nil
 }
 
 // Saves the asked website and returns an exit state

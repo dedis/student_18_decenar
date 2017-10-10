@@ -73,8 +73,7 @@ type StructSaveReply struct {
 // RetrieveAnnounce is used to pass a message to the children when the protocol
 // called is DecenarchRetrieve
 type RetrieveAnnounce struct {
-	PrimaryPath    string
-	SecondaryPaths []string
+	Url string
 }
 
 // StructRetrieveAnnounce just contains RetrieveAnnounce and the data necessary

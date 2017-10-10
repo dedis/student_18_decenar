@@ -98,16 +98,15 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 
 // RetrieveRequest
 func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.RetrieveResponse, onet.ClientError) {
-	log.Lvl3("Decenarch Service new RetriveRequest")
+	log.Lvl3("Decenarch Service new RetrieveRequest")
 	s.storage.Lock()
 	defer s.storage.Unlock()
 	if web, isSaved := s.storage.webarchive[req.Url]; isSaved {
-		//TODO do the protocol; do a barrel roll
 		tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
 		if tree == nil {
 			return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
 		}
-		pi, err := s.CreateProtocol(protocol.RetrieveName, nil)
+		pi, err := s.CreateProtocol(protocol.RetrieveName, tree)
 		if err != nil {
 			return nil, onet.NewClientErrorCode(4043, err.Error())
 		}
@@ -117,6 +116,7 @@ func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.Retr
 		data := <-pi.(*protocol.RetrieveMessage).Data
 		return &template.RetrieveResponse{Website: website, Data: data}, nil
 	} else {
+		log.Lvl3("storage:\n", s.storage.webarchive)
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
 	}
 }

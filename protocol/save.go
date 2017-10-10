@@ -146,10 +146,10 @@ func ExtractPageExternalLinks(page *bytes.Buffer) []string {
 	return links
 }
 
-// CreateParentFileHierarchy take a pointer to an url.URL structure and return
+// GetParentfileHierarchy take a pointer to an url.URL structure and return
 // the name of the file requested and the path to it inferred from the url.
 // Example: domain.ext/folder would become (index.html, ext/domain/folder)
-func CreateParentFileHierarchy(pUrl *url.URL) (string, string) {
+func GetParentfileHierarchy(pUrl *url.URL) (string, string) {
 	log.Lvl4("Creating folders for", pUrl)
 	var bottomPath string
 	var folderHierarchy []string = strings.Split(pUrl.Hostname(), ".")
@@ -166,7 +166,6 @@ func CreateParentFileHierarchy(pUrl *url.URL) (string, string) {
 	var file string
 	if string(bottomPath[len(bottomPath)-1]) != "/" {
 		tmpFileHierarchy := strings.Split(bottomPath, "/")
-		file = tmpFileHierarchy[len(tmpFileHierarchy)-1]
 		bottomPath = strings.Join(tmpFileHierarchy[:len(tmpFileHierarchy)-1], "/") + "/"
 	} else {
 		file = "index.html"
@@ -221,7 +220,7 @@ func (p *SaveMessage) SaveUrl(urlToSave string) error {
 	}
 	defer getResp.Body.Close()
 	urlStruct, urlErr := url.Parse(getResp.Request.URL.String())
-	p.RealUrl <- getResp.Request.URL.String() //ANTONAUSTYROLL
+	p.RealUrl <- getResp.Request.URL.String()
 	if urlErr != nil {
 		return urlErr
 	}
@@ -230,7 +229,7 @@ func (p *SaveMessage) SaveUrl(urlToSave string) error {
 	pageReader := io.TeeReader(getResp.Body, &pageBuffer)
 
 	// we record parent file
-	parentFile, parentFolder := CreateParentFileHierarchy(urlStruct)
+	parentFile, parentFolder := GetParentfileHierarchy(urlStruct)
 	mkErr := os.MkdirAll(parentFolder, os.ModePerm|os.ModeDir)
 	if mkErr != nil {
 		return mkErr
