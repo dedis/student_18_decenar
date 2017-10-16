@@ -42,6 +42,7 @@ type SaveMessage struct {
 	Errs    []error
 	ChanUrl chan string
 	RealUrl chan string
+	FsPath  chan string
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -52,6 +53,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		Url:              "",
 		ChanUrl:          make(chan string),
 		RealUrl:          make(chan string),
+		FsPath:           make(chan string),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -216,14 +218,20 @@ func (p *SaveMessage) SaveUrl(urlToSave string) error {
 	log.Lvl4("Saving website on system")
 	getResp, getErr := http.Get(urlToSave)
 	if getErr != nil {
+		// fill channel with dummy values to avoid service deadlock
+		p.RealUrl <- ""
+		p.FsPath <- ""
 		return getErr
 	}
 	defer getResp.Body.Close()
 	urlStruct, urlErr := url.Parse(getResp.Request.URL.String())
-	p.RealUrl <- getResp.Request.URL.String()
 	if urlErr != nil {
+		// fill channel with dummy values to avoid service deadlock
+		p.RealUrl <- ""
+		p.FsPath <- ""
 		return urlErr
 	}
+	p.RealUrl <- getResp.Request.URL.String()
 	// we create two buffers to record the page and extract external ressources
 	var pageBuffer bytes.Buffer
 	pageReader := io.TeeReader(getResp.Body, &pageBuffer)
@@ -232,13 +240,17 @@ func (p *SaveMessage) SaveUrl(urlToSave string) error {
 	parentFile, parentFolder := GetParentfileHierarchy(urlStruct)
 	mkErr := os.MkdirAll(parentFolder, os.ModePerm|os.ModeDir)
 	if mkErr != nil {
+		// fill channel with dummy values to avoid service deadlock
+		p.FsPath <- ""
 		return mkErr
 	}
 	fileErr := SaveFile(parentFolder+parentFile, pageReader)
 	if fileErr != nil {
+		// fill channel with dummy values to avoid service deadlock
+		p.FsPath <- ""
 		return fileErr
 	}
-
+	p.FsPath <- parentFolder + parentFile
 	// we record additional ressources
 	additionalLinks := ExtractPageExternalLinks(&pageBuffer)
 	for _, link := range additionalLinks {

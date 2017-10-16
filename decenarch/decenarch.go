@@ -129,7 +129,7 @@ func cmdRetrieve(c *cli.Context) error {
 			log.Lvl3("Impossible to cache", path, ":", err)
 		}
 	}
-	log.Info("Website", url, "retrieved in", resp.Website)
+	log.Info("Website", url, "retrieved in", prefix+resp.Website)
 	return nil
 }
 
