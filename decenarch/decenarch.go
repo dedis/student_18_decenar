@@ -23,20 +23,6 @@ func main() {
 	groupsDef := "the group-definition-file"
 	cliApp.Commands = []cli.Command{
 		{
-			Name:      "time",
-			Usage:     "measure the time to contact all nodes",
-			Aliases:   []string{"t"},
-			ArgsUsage: groupsDef,
-			Action:    cmdTime,
-		},
-		{
-			Name:      "counter",
-			Usage:     "return the counter",
-			Aliases:   []string{"c"},
-			ArgsUsage: groupsDef,
-			Action:    cmdCounter,
-		},
-		{
 			Name:      "retrieve",
 			Usage:     "retrive the website",
 			Aliases:   []string{"r"},
@@ -62,13 +48,6 @@ func main() {
 				},
 			},
 		},
-		{
-			Name:      "dummy",
-			Usage:     "dummy new command",
-			Aliases:   []string{"d"},
-			ArgsUsage: groupsDef,
-			Action:    dummy,
-		},
 	}
 	cliApp.Flags = []cli.Flag{
 		app.FlagDebug,
@@ -78,10 +57,6 @@ func main() {
 		return nil
 	}
 	cliApp.Run(os.Args)
-}
-
-func dummy(c *cli.Context) {
-	log.Info("Dummy Command")
 }
 
 // cacheData save data on file system using the path provided
@@ -147,32 +122,6 @@ func cmdSave(c *cli.Context) error {
 		log.Fatal("When asking to save", url, ":", err)
 	}
 	log.Info("Website", url, "saved.", resp)
-	return nil
-}
-
-// Returns the time needed to contact all nodes.
-func cmdTime(c *cli.Context) error {
-	log.Info("Time command")
-	group := readGroup(c)
-	client := decenarch.NewClient()
-	resp, err := client.Clock(group.Roster)
-	if err != nil {
-		log.Fatal("When asking the time:", err)
-	}
-	log.Infof("Children: %d - Time spent: %f", resp.Children, resp.Time)
-	return nil
-}
-
-// Returns the number of calls.
-func cmdCounter(c *cli.Context) error {
-	log.Info("Counter command")
-	group := readGroup(c)
-	client := decenarch.NewClient()
-	counter, err := client.Count(group.Roster.RandomServerIdentity())
-	if err != nil {
-		log.Fatal("When asking for counter:", err)
-	}
-	log.Info("Number of requests:", counter)
 	return nil
 }
 

@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"errors"
 	"sync"
-	"time"
 
 	"io/ioutil"
 
@@ -53,7 +52,6 @@ const storageID = "main"
 
 // storage is used to save our data.
 type storage struct {
-	Count      int
 	webarchive map[string]webstore
 
 	sync.Mutex
@@ -196,38 +194,6 @@ func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.Retr
 	}
 }
 
-// ClockRequest starts a template-protocol and returns the run-time.
-func (s *Service) ClockRequest(req *template.ClockRequest) (*template.ClockResponse, onet.ClientError) {
-	log.Lvl3("Decenarch Service new ClockRequest")
-	s.storage.Lock()
-	s.storage.Count++
-	s.storage.Unlock()
-	s.save()
-	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
-	if tree == nil {
-		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
-	}
-	pi, err := s.CreateProtocol(protocol.Name, tree)
-	if err != nil {
-		return nil, onet.NewClientError(err)
-	}
-	start := time.Now()
-	pi.Start()
-	resp := &template.ClockResponse{
-		Children: <-pi.(*protocol.Template).ChildCount,
-	}
-	resp.Time = time.Now().Sub(start).Seconds()
-	return resp, nil
-}
-
-// CountRequest returns the number of instantiations of the protocol.
-func (s *Service) CountRequest(req *template.CountRequest) (*template.CountResponse, onet.ClientError) {
-	log.Lvl3("Decenarch Service new CountRequest")
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return &template.CountResponse{Count: s.storage.Count}, nil
-}
-
 // NewProtocol is called on all nodes of a Tree (except the root, since it is
 // the one starting the protocol) so it's the Service that will be called to
 // generate the PI on all others node.
@@ -283,7 +249,7 @@ func newService(c *onet.Context) onet.Service {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
 	}
-	if err := s.RegisterHandlers(s.ClockRequest, s.CountRequest, s.SaveRequest, s.RetrieveRequest); err != nil {
+	if err := s.RegisterHandlers(s.SaveRequest, s.RetrieveRequest); err != nil {
 		log.ErrFatal(err, "Couldn't register messages")
 	}
 	if err := s.tryLoad(); err != nil {

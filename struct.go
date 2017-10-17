@@ -12,8 +12,6 @@ import (
 // We need to register all messages so the network knows how to handle them.
 func init() {
 	for _, msg := range []interface{}{
-		CountRequest{}, CountResponse{},
-		ClockRequest{}, ClockResponse{},
 		SaveRequest{}, SaveResponse{},
 		RetrieveRequest{}, RetrieveResponse{},
 	} {
@@ -27,27 +25,6 @@ const (
 	// CachePath indicates where to cache retrieved websites
 	CachePath = "/tmp/cocache"
 )
-
-// ClockRequest will run the tepmlate-protocol on the roster and return
-// the time spent doing so.
-type ClockRequest struct {
-	Roster *onet.Roster
-}
-
-// ClockResponse returns the time spent for the protocol-run.
-type ClockResponse struct {
-	Time     float64
-	Children int
-}
-
-// CountRequest will return how many times the protocol has been run.
-type CountRequest struct {
-}
-
-// CountResponse returns the number of protocol-runs
-type CountResponse struct {
-	Count int
-}
 
 // SaveRequest will save the website in the conodes using the protocol and
 // return the exit state of the saving process
