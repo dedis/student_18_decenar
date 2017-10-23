@@ -17,6 +17,7 @@ import (
 
 	cosiprotocol "github.com/dedis/cothority/cosi/protocol"
 	cosiservice "github.com/dedis/cothority/cosi/service"
+	skipchain "github.com/dedis/cothority/skipchain"
 
 	"gopkg.in/dedis/crypto.v0/abstract"
 	"gopkg.in/dedis/onet.v1"

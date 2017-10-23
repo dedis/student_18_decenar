@@ -11,16 +11,25 @@ import "gopkg.in/dedis/onet.v1"
 
 // Name can be used from other packages to refer to this protocol.
 const Name = "Decenarch"
-const SaveName = "DecenarchSave"
-const RetrieveName = "DecenarchRetrieve"
+const SaveName = Name + "Save"
+const RetrieveName = Name + "Retrieve"
 
 // ***************** Struct for DecenarchSave ****************************** //
+
+// WeightedPath represent one path in an html graph. HashPath is the hash of
+// the path. Signatures are the signatures of the differents conodes that
+// happens to match the HashPath. The number of signature is the number of
+// occurence of the path. The key is the public key of the signing server.
+type WeightedPath struct {
+	HashPath   []byte
+	Signatures map[[]byte][]byte
+}
 
 // SaveAnnounce is used to pass a message to all children when the protocol
 // called is DecenarchSave
 type SaveAnnounce struct {
-	Hash []byte
-	Url  string
+	Url        string
+	WeightTree []WeightedPath
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -33,8 +42,8 @@ type StructSaveAnnounce struct {
 // SaveReply returns the Hash computed by the children of the website and the
 // errors that happens
 type SaveReply struct {
-	Hash []byte
-	Errs []error
+	Errs       []error
+	WeightTree []WeightedPath
 }
 
 // StructSaveReply just contains StructSaveReply and the data necessary to

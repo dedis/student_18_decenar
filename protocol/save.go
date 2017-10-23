@@ -33,16 +33,27 @@ func init() {
 	onet.GlobalProtocolRegister(SaveName, NewSaveProtocol)
 }
 
-// Template just holds a message that is passed to all children. It
+// SavePhase is an indicator of the behaviour to have for a child of the
+// root in the protocol.
+type SavePhase uint32
+
+const (
+	NilPhase SavePhase = iota
+	ConsensusTree
+	RequestMissingPath
+	CoSigning
+	SkipchainSaving
+	End
+)
+
+// SaveMessage just holds a message that is passed to all children. It
 // also defines a channel that will receive the number of children. Only the
 // root-node will write to the channel.
 type SaveMessage struct {
 	*onet.TreeNodeInstance
-	Url     string
-	Errs    []error
-	ChanUrl chan string
-	RealUrl chan string
-	FsPath  chan string
+	Errs  []error
+	Url   string
+	Phase SavePhase
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -51,9 +62,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	t := &SaveMessage{
 		TreeNodeInstance: n,
 		Url:              "",
-		ChanUrl:          make(chan string),
-		RealUrl:          make(chan string),
-		FsPath:           make(chan string),
+		Phase:            NilPhase,
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -69,7 +78,7 @@ func (p *SaveMessage) Start() error {
 	saveUrl := p.Url
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
-		SaveAnnounce{Url: saveUrl, Hash: []byte{byte(0)}},
+		SaveAnnounce{Url: saveUrl, WeightTree: nil},
 	})
 }
 
@@ -77,6 +86,18 @@ func (p *SaveMessage) Start() error {
 // is stored in all nodes.
 func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 	log.Lvl4("Handling", p)
+	// PHASE CONSENSUS TREE
+	// TODO send url to children
+	// TODO if leaf, begin to reply
+	// PHASE REQUEST MISSING PATH
+	// TODO identify path for witch occurence > threshold but you dont have
+	// TODO ask children for missing parts
+	// PHASE COSIGNING
+	// TODO probably service-level cosign
+	// PHASE SKIPCHAIN SAVING
+	// TODO probably service-level skipchain
+	// PHASE END
+	// TODO close error coroutine
 	p.Url = msg.SaveAnnounce.Url
 	err := p.SaveUrl(msg.SaveAnnounce.Url)
 	if err != nil {
@@ -103,6 +124,22 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 	defer p.Done()
 	log.Lvl4("Handling Save Reply")
+	// PHASE CONSENSUS TREE
+	// TODO get url data (realurl, file, additional ressources eventually)
+	// TODO create tree
+	// TODO prune tree
+	// TODO verify signature of children, if invalid, remove entry
+	// TODO add your hashpath table signature in the one recevied by children
+	// TODO if ROOT, infer the consensus tree and go to phase RequestMissingPath
+	// PHASE REQUEST MISSING PATH
+	// TODO if get requested path, send it else send request to children
+	// TODO if ROOT, check path (by hashing it), create tree and go to phase CoSign
+	// PHASE COSIGNING
+	// TODO probably service-level cosign
+	// PHASE SKIPCHAIN SAVING
+	// TODO probably service-level skipchain
+	// PHASE END
+	// TODO close error coroutine
 	var AllErrs []error
 	for _, r := range reply {
 		for _, erro := range r.Errs {
