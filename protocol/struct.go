@@ -7,7 +7,11 @@ with the `*onet.TreeNode` embedded. The latter is used in the handler-function
 so that it can find out who sent the message.
 */
 
-import "gopkg.in/dedis/onet.v1"
+import (
+	"golang.org/x/net/html"
+	"gopkg.in/dedis/onet.v1"
+	"gopkg.in/dedis/onet.v1/network"
+)
 
 // Name can be used from other packages to refer to this protocol.
 const Name = "Decenarch"
@@ -16,20 +20,36 @@ const RetrieveName = Name + "Retrieve"
 
 // ***************** Struct for DecenarchSave ****************************** //
 
-// WeightedPath represent one path in an html graph. HashPath is the hash of
-// the path. Signatures are the signatures of the differents conodes that
+// SavePhase is an indicator of the behaviour to have for a child of the
+// root in the protocol.
+type SavePhase uint32
+
+const (
+	NilPhase SavePhase = iota
+	Consensus
+	RequestMissingPath
+	CoSigning
+	SkipchainSaving
+	End
+)
+
+// PathHash represent a unique identifier for a path
+type PathHash string
+
+// Signatures are the signatures of the differents conodes that
 // happens to match the HashPath. The number of signature is the number of
-// occurence of the path. The key is the public key of the signing server.
-type WeightedPath struct {
-	HashPath   []byte
-	Signatures map[[]byte][]byte
-}
+// occurence of the path. The key is the server identity of the signing server.
+type PathSignatures map[*network.ServerIdentity][]byte
+
+// WeightedPath represent one path in an html or css tree.
+type WeightedPath map[PathHash]PathSignatures
 
 // SaveAnnounce is used to pass a message to all children when the protocol
 // called is DecenarchSave
 type SaveAnnounce struct {
-	Url        string
-	WeightTree []WeightedPath
+	Phase SavePhase
+	Url   string
+	Paths WeightedPath
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -42,8 +62,11 @@ type StructSaveAnnounce struct {
 // SaveReply returns the Hash computed by the children of the website and the
 // errors that happens
 type SaveReply struct {
-	Errs       []error
-	WeightTree []WeightedPath
+	Phase        SavePhase
+	Url          string
+	Errs         []error
+	WeightTree   WeightedPath
+	MissingPaths map[PathHash][]*html.Node
 }
 
 // StructSaveReply just contains StructSaveReply and the data necessary to

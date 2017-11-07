@@ -6,27 +6,21 @@ runs on the node.
 */
 
 import (
-	"bytes"
 	"errors"
+	"math"
 	"sync"
-
-	"io/ioutil"
 
 	"github.com/nblp/decenarch"
 	"github.com/nblp/decenarch/protocol"
 
-	cosiprotocol "github.com/dedis/cothority/cosi/protocol"
 	cosiservice "github.com/dedis/cothority/cosi/service"
-	skipchain "github.com/dedis/cothority/skipchain"
 
-	"gopkg.in/dedis/crypto.v0/abstract"
 	"gopkg.in/dedis/onet.v1"
-	"gopkg.in/dedis/onet.v1/crypto"
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"
 )
 
-//"golang.org/x/crypto/bcrypt"
+//TODO skipchain "github.com/dedis/cothority/skipchain"
 
 // Used for tests
 var templateID onet.ServiceID
@@ -65,74 +59,10 @@ type webstore struct {
 	Sig    *cosiservice.SignatureResponse
 }
 
-func RequestSignature(f string, r *onet.Roster) (*cosiservice.SignatureResponse, error) {
-	if f == "" {
-		return nil, errors.New("Invalid file input")
-	}
-	bF, bErr := ioutil.ReadFile(f)
-	if bErr != nil {
-		return nil, bErr
-	}
-	c := cosiservice.NewClient()
-	sig, err := c.SignatureRequest(r, bF)
-	if err != nil {
-		return nil, err
-	}
-	log.Lvl5("file/signature", f, sig)
-	return sig, nil
-}
-
-// VerificationSignature is an almost full copycat of the cosi/client.go
-// verifySignatureHash. It verifies the validity of the signature sig emits by
-// the roster el for the bytes b
-func VerificationSignature(b []byte, sig *cosiservice.SignatureResponse, el *onet.Roster) error {
-	fPublics := func(r *onet.Roster) []abstract.Point {
-		publics := make([]abstract.Point, len(r.List))
-		for i, e := range r.List {
-			publics[i] = e.Public
-		}
-		return publics
-	}
-	publics := fPublics(el)
-	hashHash, _ := crypto.HashBytes(network.Suite.Hash(), b)
-	log.Lvl5("fileH, sigH", hashHash, sig.Hash)
-	if !bytes.Equal(hashHash, sig.Hash) {
-		return errors.New("You are trying to verify a signature " +
-			"belonging to another file. (The hash provided by the signature " +
-			"doesn't match with the hash of the file.)")
-	}
-	if err := cosiprotocol.VerifySignature(network.Suite, publics, b, sig.Signature); err != nil {
-		return errors.New("Invalid sig:" + err.Error())
-	}
-	return nil
-}
-
-// StoreWebArchive add the saved url to the service's list of saved website
-func StoreWebArchive(s *Service, url string, realUrl string, fsPath string, sig *cosiservice.SignatureResponse) {
-	log.Lvl4("Store", url, "as archived website with realUrl", realUrl)
-	if url == "" || realUrl == "" || fsPath == "" {
-		log.Lvl3("Not storing the website as archived: invalid inputs")
-	}
-	// add entry to archive storage
-	web := webstore{
-		Url:    realUrl,
-		FsPath: fsPath,
-		Sig:    sig,
-	}
-	s.storage.Lock()
-	if s.storage.webarchive == nil {
-		s.storage.webarchive = make(map[string]webstore)
-	}
-	// we store the page under the alias (url) and effective url (realUrl)
-	s.storage.webarchive[url] = web
-	s.storage.webarchive[realUrl] = web
-	s.storage.Unlock()
-	s.save()
-}
-
 // SaveRequest
 func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new SaveRequest")
+	// find a consensus on webpage
 	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
@@ -142,57 +72,70 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
 	pi.(*protocol.SaveMessage).Url = req.Url
+	// BUG(nblp) threshold should not be hardcoded
+	pi.(*protocol.SaveMessage).Threshold = uint32(math.Ceil(float64(len(tree.Roster.List)) * 0.8))
 	go pi.Start()
-	realUrl := <-pi.(*protocol.SaveMessage).RealUrl
-	path := <-pi.(*protocol.SaveMessage).FsPath
-	sig, err := RequestSignature(path, req.Roster)
-	if err != nil {
-		log.Fatal("Error during signature retrival:", err)
+	var msgToSign []byte = <-pi.(*protocol.SaveMessage).MsgToSign
+	cosiClient := cosiservice.NewClient()
+	sig, sigErr := cosiClient.SignatureRequest(req.Roster, msgToSign)
+	if sigErr != nil {
+		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
-	StoreWebArchive(s, req.Url, realUrl, path, sig)
+	log.Lvl4("Create stored request")
+	CreateStoredRequest(msgToSign, sig)
+	// TODO store result in Skipchain
+	// TODO relaunch it for all additional ressources
+
+	// TODO update code below
 	resp := &template.SaveResponse{}
 	return resp, nil
+}
+
+// TODO create function
+func CreateStoredRequest(rawData []byte, sig *cosiservice.SignatureResponse) error {
+	return nil
 }
 
 // RetrieveRequest
 func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.RetrieveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new RetrieveRequest")
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	if web, isSaved := s.storage.webarchive[req.Url]; isSaved {
-		// retrive website
-		log.Lvl4("Retrive Website Raw Data")
-		tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
-		if tree == nil {
-			return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
-		}
-		pi, err := s.CreateProtocol(protocol.RetrieveName, tree)
-		if err != nil {
-			return nil, onet.NewClientErrorCode(4043, err.Error())
-		}
-		pi.(*protocol.RetrieveMessage).Url = web.Url
-		go pi.Start()
-		website := <-pi.(*protocol.RetrieveMessage).ParentPath
-		data := <-pi.(*protocol.RetrieveMessage).Data
-		// (cosi) control signature
-		log.Lvl4("Verify Website Signature")
-		voFile, voErr := ioutil.ReadFile(website)
-		if voErr != nil {
-			log.Lvl4("Verification error: cannot read file")
-			return nil, onet.NewClientErrorCode(4043, voErr.Error())
-		}
-		sig := web.Sig
-		vErr := VerificationSignature(voFile, sig, req.Roster)
-		if vErr != nil {
-			log.Lvl4("Verification error: cannot verify signature", vErr)
-			return nil, onet.NewClientErrorCode(4043, vErr.Error())
-		}
-		log.Lvl4("Verification Done.")
-		return &template.RetrieveResponse{Website: website, Data: data}, nil
-	} else {
-		log.Lvl3("storage:\n", s.storage.webarchive)
-		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
-	}
+	//	s.storage.Lock()
+	//	defer s.storage.Unlock()
+	//	if web, isSaved := s.storage.webarchive[req.Url]; isSaved {
+	//		// retrive website
+	//		log.Lvl4("Retrive Website Raw Data")
+	//		tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
+	//		if tree == nil {
+	//			return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
+	//		}
+	//		pi, err := s.CreateProtocol(protocol.RetrieveName, tree)
+	//		if err != nil {
+	//			return nil, onet.NewClientErrorCode(4043, err.Error())
+	//		}
+	//		pi.(*protocol.RetrieveMessage).Url = web.Url
+	//		go pi.Start()
+	//		website := <-pi.(*protocol.RetrieveMessage).ParentPath
+	//		data := <-pi.(*protocol.RetrieveMessage).Data
+	//		// (cosi) control signature
+	//		log.Lvl4("Verify Website Signature")
+	//		voFile, voErr := ioutil.ReadFile(website)
+	//		if voErr != nil {
+	//			log.Lvl4("Verification error: cannot read file")
+	//			return nil, onet.NewClientErrorCode(4043, voErr.Error())
+	//		}
+	//		sig := web.Sig
+	//		vErr := VerificationSignature(voFile, sig, req.Roster)
+	//		if vErr != nil {
+	//			log.Lvl4("Verification error: cannot verify signature", vErr)
+	//			return nil, onet.NewClientErrorCode(4043, vErr.Error())
+	//		}
+	//		log.Lvl4("Verification Done.")
+	//		return &template.RetrieveResponse{Website: website, Data: data}, nil
+	//	} else {
+	//		log.Lvl3("storage:\n", s.storage.webarchive)
+	//		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
+	//	}
+	return nil, nil
 }
 
 // NewProtocol is called on all nodes of a Tree (except the root, since it is
@@ -204,14 +147,7 @@ func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.Retr
 // give some extra-configuration to your protocol in here.
 func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
 	log.Lvl3("Decenarch Service new protocol event")
-	pi, err := protocol.NewSaveProtocol(tn)
-	go func() {
-		realUrl := <-pi.(*protocol.SaveMessage).RealUrl
-		path := <-pi.(*protocol.SaveMessage).FsPath
-		saveUrl := <-pi.(*protocol.SaveMessage).ChanUrl
-		StoreWebArchive(s, saveUrl, realUrl, path, nil) //TODO access signature
-	}()
-	return pi, err
+	return nil, nil
 }
 
 // saves all skipblocks.
