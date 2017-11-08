@@ -72,7 +72,7 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
 	pi.(*protocol.SaveMessage).Url = req.Url
-	// BUG(nblp) threshold should not be hardcoded
+	// IMPROVEMENT threshold could not be hardcoded
 	pi.(*protocol.SaveMessage).Threshold = uint32(math.Ceil(float64(len(tree.Roster.List)) * 0.8))
 	go pi.Start()
 	var msgToSign []byte = <-pi.(*protocol.SaveMessage).MsgToSign

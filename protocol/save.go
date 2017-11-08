@@ -56,6 +56,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		TreeNodeInstance: n,
 		Url:              "",
 		Phase:            NilPhase,
+		Paths:            make(map[PathHash][]*html.Node),
 		MsgToSign:        make(chan []byte),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
@@ -98,8 +99,9 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 		defer p.HandleReply([]StructSaveReply{resp})
 		return err
 	case Consensus:
+		log.Lvl4("Consensus Phase")
 		if !p.IsLeaf() {
-			p.SendToChildren(msg)
+			p.SendToChildren(&msg.SaveAnnounce)
 		} else {
 			resp := StructSaveReply{
 				p.TreeNode(),
@@ -107,11 +109,11 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 					Phase: msg.SaveAnnounce.Phase,
 					Url:   msg.SaveAnnounce.Url},
 			}
-			defer p.HandleReply([]StructSaveReply{resp})
+			p.HandleReply([]StructSaveReply{resp})
 		}
 		return nil
 	case RequestMissingPath:
-		// PHASE REQUEST MISSING PATH
+		log.Lvl4("Missing Path Phase with", p)
 		if p.IsRoot() {
 			if p.ConsensusTree == nil {
 				return errors.New("RequestMissingPath on nil tree")
@@ -128,6 +130,7 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 				p.Paths = plainPath // we keep only consensus path
 				// if root has all the path, skip the phase for children
 				if len(missingPaths) == 0 {
+					log.Lvl4("Root has all the paths already !")
 					p.Phase = RequestMissingPath
 					resp := StructSaveReply{
 						p.TreeNode(),
@@ -145,7 +148,7 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 							Url:   p.Url,
 							Paths: missingPaths},
 					}
-					p.SendToChildren(childrenAnnouce)
+					p.SendToChildren(&childrenAnnouce.SaveAnnounce)
 				}
 				return nil
 			}
@@ -177,7 +180,7 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 						Url:   p.Url,
 						Paths: missingPathLeft},
 				}
-				p.SendToChildren(childrenAnnouce)
+				p.SendToChildren(&childrenAnnouce.SaveAnnounce)
 			}
 		}
 	case CoSigning:
@@ -187,8 +190,8 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 		// PHASE SKIPCHAIN SAVING
 		// For the moment, we use the Cosi API at service level
 	case End:
-		// PHASE END
-		p.SendToChildren(msg)
+		log.Lvl4("End Phase")
+		p.SendToChildren(&msg.SaveAnnounce)
 	default:
 		log.Lvl1("Unknown phase passed by", p, "msg:", msg)
 		err := errors.New("Unknown Phase")
@@ -208,20 +211,21 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 // HandleReply is the message going up the tree and holding a counter
 // to verify the number of nodes.
 func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
-	log.Lvl4("Handling Save Reply", p)
-	log.Lvl4("And the replies", reply)
+	log.Lvl3("Handling Save Reply", p)
+	log.Lvl3("And the replies", reply)
 	switch p.Phase {
 	case NilPhase:
 		log.Lvl1("NilPhase passed by", p)
 		defer p.Done()
 		return errors.New("NilPhase should not be replyable")
 	case Consensus:
+		log.Lvl4("Consensus Reply Phase")
 		resp, err := p.ConsensusBehaviour(reply)
 		if err != nil {
 			return err
 		}
 		if p.IsRoot() {
-			log.Lvl3("Consensus reach root. Passing to next phase")
+			log.Lvl4("Consensus reach root. Passing to next phase")
 			p.ConsensusTree = CreateConsensusTree(p, resp.WeightTree)
 			p.Phase = RequestMissingPath
 			msg := SaveAnnounce{
@@ -235,6 +239,7 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 			return p.SendTo(p.Parent(), &resp)
 		}
 	case RequestMissingPath:
+		log.Lvl4("Missing Path Reply Phase")
 		if p.IsRoot() {
 			for _, r := range reply {
 				for hPath, nodes := range r.SaveReply.MissingPaths {
@@ -270,6 +275,7 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 		// For the moment, we use the Skipchain API at service level
 	case End:
 		// PHASE END
+		log.Lvl4("End Reply Phase")
 		log.Lvl1("Node is done")
 		defer p.Done()
 		if !p.IsRoot() {
@@ -291,6 +297,7 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 }
 
 func (p *SaveMessage) BuildConsensusHtmlPage() []byte {
+	log.Lvl4("Begin building of consenus html page")
 	var outputTree *html.Node = nil
 	for _, way := range p.Paths {
 		// paths were given from leaf to root. we reverse that
@@ -448,39 +455,46 @@ func CreateConsensusTree(p *SaveMessage, origin WeightedPath) WeightedPath {
 // ConsensusBehaviour define the behaviour to handle for the node in the
 // consensus phase. Mainly to differentiate html, css and image media
 // consensus protocols.
-func (p *SaveMessage) ConsensusBehaviour(reply []StructSaveReply) (StructSaveReply, error) {
-	resp := StructSaveReply{
-		p.TreeNode(),
-		SaveReply{
-			Phase:      Consensus,
-			Url:        p.Url,
-			Errs:       make([]error, 0),
-			WeightTree: make(WeightedPath)},
-	}
+func (p *SaveMessage) ConsensusBehaviour(reply []StructSaveReply) (SaveReply, error) {
+	log.Lvl5("Begin Consenus behavior for a node")
+	resp := SaveReply{
+		Phase:      Consensus,
+		Url:        p.Url,
+		Errs:       make([]error, 0),
+		WeightTree: make(WeightedPath)}
 	var url string = p.Url
 	for _, r := range reply {
 		if url != r.SaveReply.Url {
+			log.Lvl1("Consensus: url of children not identical to parent")
 			urlErr := errors.New("Children do not agree on url")
 			resp.Errs = append(resp.Errs, urlErr)
 			return resp, urlErr
 		}
 	}
-	var returnErr error = nil
 
+	var returnErr error = nil
 	getResp, _, structURL, err := GetData(p.Url)
 	if err != nil {
-		resp.SaveReply.Errs = append(resp.SaveReply.Errs, err)
+		resp.Errs = append(resp.Errs, err)
 		return resp, err
 	}
-	getResp.Body.Close()
+	defer getResp.Body.Close()
 
-	switch path.Ext(structURL.Path) {
+	extension := path.Ext(structURL.Path)
+	// test if a file was explicitely provided in the request
+	if string(structURL.Path[len(structURL.Path)-1]) == "/" {
+		// we assume the default file served remotely is an html one
+		extension = ".html"
+	}
+	switch extension {
 	case ".htm", ".html":
+		log.Lvl4("Begin consensus for html files")
 		tree, treeErr := html.Parse(getResp.Body)
 		var myWeightTree WeightedPath
 		var cumulatedTree WeightedPath
 		var cumulatedErrs []error = make([]error, 0)
 		if treeErr != nil {
+			log.Lvl1("Error during tree parsing", treeErr.Error())
 			myWeightTree = nil
 			cumulatedErrs = append(cumulatedErrs, treeErr)
 		} else {
@@ -493,7 +507,7 @@ func (p *SaveMessage) ConsensusBehaviour(reply []StructSaveReply) (StructSaveRep
 			childrenTree := GetVerifiedTree(r.SaveReply.WeightTree)
 			cumulatedTree = cumulatedTree.InsertTree(childrenTree)
 		}
-		resp.SaveReply.WeightTree = cumulatedTree
+		resp.WeightTree = cumulatedTree
 	case ".css":
 		// TODO tree comparaison (for css)
 		returnErr = errors.New("No css protocol implemented")
@@ -559,7 +573,7 @@ func GetData(url string) (*http.Response, string, *urlpkg.URL, error) {
 
 	realUrl := getResp.Request.URL.String()
 
-	urlStruct, urlErr := urlpkg.Parse(getResp.Request.URL.String())
+	urlStruct, urlErr := urlpkg.Parse(realUrl)
 	if urlErr != nil {
 		getResp.Body.Close()
 		return nil, "", nil, urlErr
@@ -597,6 +611,7 @@ func PruneTree(tree *html.Node) *html.Node {
 // the WeightTree for the current node. This means that it take all the possible
 // paths of the tree given as input, hash it and sign the given hash.
 func CreateWeightTree(p *SaveMessage, tree *html.Node) WeightedPath {
+	log.Lvl4("Creating tree")
 	leaves := LeavesDiscovery(tree)
 	weightTree := make(WeightedPath)
 	for _, leaf := range leaves {
@@ -647,7 +662,7 @@ func LeavesDiscovery(root *html.Node) []*html.Node {
 	var leaves []*html.Node = make([]*html.Node, 0)
 	var curr *html.Node
 	stack = append(stack, root)
-	for stack != nil {
+	for len(stack) != 0 {
 		l := len(stack)
 		if l == 0 {
 			curr = nil
