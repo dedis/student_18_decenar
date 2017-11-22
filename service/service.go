@@ -9,6 +9,7 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/nblp/decenarch"
 	"github.com/nblp/decenarch/protocol"
@@ -20,14 +21,14 @@ import (
 	"gopkg.in/dedis/onet.v1/network"
 )
 
-//TODO skipchain "github.com/dedis/cothority/skipchain"
+//	skipchain "github.com/dedis/cothority/skipchain"
 
 // Used for tests
 var templateID onet.ServiceID
 
 func init() {
 	var err error
-	templateID, err = onet.RegisterNewService(template.ServiceName, newService)
+	templateID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
 	log.ErrFatal(err)
 	network.RegisterMessage(&storage{})
 }
@@ -54,18 +55,20 @@ type storage struct {
 
 // webstore is used to store website
 type webstore struct {
-	Url    string
-	FsPath string
-	Sig    *cosiservice.SignatureResponse
+	Url       string
+	Sig       *cosiservice.SignatureResponse
+	Page      []byte
+	Timestamp string
 }
 
-// SaveRequest
-func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse, onet.ClientError) {
+// SaveRequest is the function called by the service when a client want to save a website in the
+// archive.
+func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new SaveRequest")
 	// find a consensus on webpage
 	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
 	if tree == nil {
-		return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
+		return nil, onet.NewClientErrorCode(decenarch.ErrorParse, "couldn't create tree")
 	}
 	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
@@ -75,29 +78,42 @@ func (s *Service) SaveRequest(req *template.SaveRequest) (*template.SaveResponse
 	// IMPROVEMENT threshold could not be hardcoded
 	pi.(*protocol.SaveMessage).Threshold = uint32(math.Ceil(float64(len(tree.Roster.List)) * 0.8))
 	go pi.Start()
+	// sign the consensus website found
 	var msgToSign []byte = <-pi.(*protocol.SaveMessage).MsgToSign
 	cosiClient := cosiservice.NewClient()
 	sig, sigErr := cosiClient.SignatureRequest(req.Roster, msgToSign)
 	if sigErr != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
-	log.Lvl4("Create stored request")
-	CreateStoredRequest(msgToSign, sig)
-	// TODO store result in Skipchain
+	web := webstore{
+		Url:       req.Url,
+		Sig:       sig,
+		Page:      msgToSign,
+		Timestamp: time.Now().Format("2006.01.02.15:04"),
+	}
+	log.Lvl4("Create stored request", string(web.Page))
+	// store result in Skipchain: TODO done in other cothority
+	//skipchainClient := skipchain.NewClient()
+	//block, blocErr := skipchainClient.CreateGenesis(
+	//	req.Roster, 2, 2,
+	//	skipchain.VerificationStandard, web, nil)
+	//if blocErr != nil {
+	//	return nil, onet.NewClientErrorCode(4042, blocErr.Error())
+	//}
+	//// TODO control if skipchain already exist
+	//skipResp, storErr := skipchainClient.StoreSkipBlock(block, nil, nil)
+	//if storErr != nil {
+	//	return nil, onet.NewClientErrorCode(4042, storErr.Error())
+	//}
+
 	// TODO relaunch it for all additional ressources
 
-	// TODO update code below
-	resp := &template.SaveResponse{}
+	resp := &decenarch.SaveResponse{}
 	return resp, nil
 }
 
-// TODO create function
-func CreateStoredRequest(rawData []byte, sig *cosiservice.SignatureResponse) error {
-	return nil
-}
-
 // RetrieveRequest
-func (s *Service) RetrieveRequest(req *template.RetrieveRequest) (*template.RetrieveResponse, onet.ClientError) {
+func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new RetrieveRequest")
 	//	s.storage.Lock()
 	//	defer s.storage.Unlock()

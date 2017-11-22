@@ -1,4 +1,4 @@
-package template_test
+package decenarch_test
 
 import (
 	"testing"
@@ -24,7 +24,7 @@ func TestClient_Clock(t *testing.T) {
 	_, roster, _ := local.GenTree(nbr, true)
 	defer local.CloseAll()
 
-	c := template.NewClient()
+	c := decenarch.NewClient()
 	cl1, err := c.Clock(roster)
 	log.ErrFatal(err)
 	assert.Equal(t, nbr, cl1.Children)
@@ -41,7 +41,7 @@ func TestClient_Count(t *testing.T) {
 	_, roster, _ := local.GenTree(nbr, true)
 	defer local.CloseAll()
 
-	c := template.NewClient()
+	c := decenarch.NewClient()
 	// Verify it's all 0s before
 	for _, s := range roster.List {
 		count, err := c.Count(s)

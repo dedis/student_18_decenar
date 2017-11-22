@@ -481,13 +481,24 @@ func (p *SaveMessage) ConsensusBehaviour(reply []StructSaveReply) (SaveReply, er
 	defer getResp.Body.Close()
 
 	extension := path.Ext(structURL.Path)
-	// test if a file was explicitely provided in the request
-	if string(structURL.Path[len(structURL.Path)-1]) == "/" {
-		// we assume the default file served remotely is an html one
-		extension = ".html"
-	}
+
+	// default is the html behaviour
 	switch extension {
+	case ".jpg":
+		fallthrough
+	case ".png":
+		fallthrough
+	case ".gif":
+		fallthrough
+	case ".bmp":
+		// TODO implement protocol
+		returnErr = errors.New("No image protocol implemented")
+	case ".css":
+		// TODO tree comparaison (for css)
+		returnErr = errors.New("No css protocol implemented")
 	case ".htm", ".html":
+		fallthrough
+	default:
 		log.Lvl4("Begin consensus for html files")
 		tree, treeErr := html.Parse(getResp.Body)
 		var myWeightTree WeightedPath
@@ -508,12 +519,6 @@ func (p *SaveMessage) ConsensusBehaviour(reply []StructSaveReply) (SaveReply, er
 			cumulatedTree = cumulatedTree.InsertTree(childrenTree)
 		}
 		resp.WeightTree = cumulatedTree
-	case ".css":
-		// TODO tree comparaison (for css)
-		returnErr = errors.New("No css protocol implemented")
-	default:
-		// TODO hash. if == ok, else drop
-		returnErr = errors.New("No default protocol implemented")
 	}
 	return resp, returnErr
 }

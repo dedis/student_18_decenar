@@ -1,4 +1,4 @@
-package template
+package decenarch
 
 /*
 The api.go defines the methods that can be called from the outside. Most
