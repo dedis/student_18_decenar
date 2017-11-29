@@ -10,6 +10,7 @@ so that it can find out who sent the message.
 import (
 	"golang.org/x/net/html"
 	"gopkg.in/dedis/onet.v1"
+	"gopkg.in/dedis/onet.v1/crypto"
 	"gopkg.in/dedis/onet.v1/network"
 )
 
@@ -22,34 +23,28 @@ const RetrieveName = Name + "Retrieve"
 
 // SavePhase is an indicator of the behaviour to have for a child of the
 // root in the protocol.
-type SavePhase uint32
+type SavePhase int32
 
 const (
 	NilPhase SavePhase = iota
 	Consensus
-	RequestMissingPath
+	RequestMissingData
 	CoSigning
 	SkipchainSaving
 	End
 )
 
-// PathHash represent a unique identifier for a path
-type PathHash string
-
-// Signatures are the signatures of the differents conodes that
-// happens to match the HashPath. The number of signature is the number of
-// occurence of the path. The key is the server identity of the signing server.
-type PathSignatures map[*network.ServerIdentity][]byte
-
-// WeightedPath represent one path in an html or css tree.
-type WeightedPath map[PathHash]PathSignatures
-
 // SaveAnnounce is used to pass a message to all children when the protocol
 // called is DecenarchSave
+//     Phase : the phase the protocol is currently
+//     Url : the url of the webpage the conodes will reach consensus on
+//     MasterTree : the tree representing structured data with its signatures
+//     MasterHash : the hash representing unstructured data with its signatures
 type SaveAnnounce struct {
-	Phase SavePhase
-	Url   string
-	Paths WeightedPath
+	Phase      SavePhase
+	Url        string
+	MasterTree []ExplicitNode //*AnonNode
+	MasterHash map[string]map[*network.ServerIdentity]crypto.SchnorrSig
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -59,14 +54,26 @@ type StructSaveAnnounce struct {
 	SaveAnnounce
 }
 
-// SaveReply returns the Hash computed by the children of the website and the
-// errors that happens
+// SaveReply return the protocol status, the consensus data and the errors of
+// the conode that executed a save request.
+//     Phase : the phase the protocol is currently
+//     Url : the url of the webpage the conodes will reach consensus on
+//     Errs : the errors that happends during the protocol
+//     MasterTree : the tree representing structured data with its signatures
+//     MasterHash : the hash representing unstructured data with its signatures
+//     RequestedNode : the map linking the hash of an AnonNode's data with its
+//                     plaintext html data.
+//     RequestedData : the map linking the hash of an unstructured data with
+//                     its plaintext data.
 type SaveReply struct {
-	Phase        SavePhase
-	Url          string
-	Errs         []error
-	WeightTree   WeightedPath
-	MissingPaths map[PathHash][]*html.Node
+	Phase      SavePhase
+	Url        string
+	Errs       []error
+	MasterTree []ExplicitNode //*AnonNode
+	MasterHash map[string]map[*network.ServerIdentity]crypto.SchnorrSig
+
+	RequestedNode map[string]html.Node
+	RequestedData map[string][]byte
 }
 
 // StructSaveReply just contains StructSaveReply and the data necessary to
