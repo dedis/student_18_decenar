@@ -16,13 +16,13 @@ import (
 // ServiceName is used for registration on the onet.
 const ServiceName = "Decenarch"
 
-// Client is a structure to communicate with the CoSi
+// Client is a structure to communicate with the Decenarch
 // service
 type Client struct {
 	*onet.Client
 }
 
-// NewClient instantiates a new cosi.Client
+// NewClient instantiates a new decenarch.Client
 func NewClient() *Client {
 	return &Client{Client: onet.NewClient(ServiceName)}
 }

@@ -40,17 +40,19 @@ func init() {
 // root-node will write to the channel.
 type SaveMessage struct {
 	*onet.TreeNodeInstance
-	Errs       []error
-	Url        string
-	Phase      SavePhase
-	Threshold  int32
-	MasterTree *AnonNode
-	MasterHash map[string]map[*network.ServerIdentity]crypto.SchnorrSig
+	Phase       SavePhase
+	Errs        []error
+	Url         string
+	ContentType string
+	Threshold   int32
+	MasterTree  *AnonNode
+	MasterHash  map[string]map[*network.ServerIdentity]crypto.SchnorrSig
 
 	PlainNodes map[string]html.Node
 	PlainData  map[string][]byte
 
-	MsgToSign chan []byte
+	MsgToSign  chan []byte
+	StringChan chan string
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -63,6 +65,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		PlainNodes:       make(map[string]html.Node),
 		PlainData:        make(map[string][]byte),
 		MsgToSign:        make(chan []byte),
+		StringChan:       make(chan string),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -266,7 +269,13 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 		}
 
 		if p.IsRoot() {
-			p.MsgToSign <- p.BuildConsensusHtmlPage()
+			p.StringChan <- p.Url
+			p.StringChan <- p.ContentType
+			if p.MasterTree != nil {
+				p.MsgToSign <- p.BuildConsensusHtmlPage()
+			} else if p.MasterHash != nil && len(p.MasterHash) > 0 {
+				p.MsgToSign <- p.PlainData[requestedHash]
+			}
 			// announce the end of the process
 			msg := SaveAnnounce{
 				Phase: End,
@@ -319,14 +328,16 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 // If both returned value are nil, then an error occured.
 func (p *SaveMessage) GetLocalData() (*AnonNode, map[string]map[*network.ServerIdentity]crypto.SchnorrSig, error) {
 	// get data
-	resp, _, _, err := GetRemoteData(p.Url)
+	resp, realUrl, _, err := GetRemoteData(p.Url)
 	if err != nil {
 		log.Lvl1("Error! Impossible to retrieve remote data.")
 		return nil, nil, err
 	}
+	p.Url = realUrl
 	defer resp.Body.Close()
 	// apply procedure according to data type
 	contentTypes := resp.Header.Get(http.CanonicalHeaderKey("Content-Type"))
+	p.ContentType = contentTypes
 	if b, e := regexp.MatchString("text/html", contentTypes); b && e == nil {
 		htmlTree, htmlErr := html.Parse(resp.Body)
 		if htmlErr != nil {

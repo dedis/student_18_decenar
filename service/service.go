@@ -6,13 +6,19 @@ runs on the node.
 */
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"sync"
 	"time"
 
+	"encoding/base64"
+
 	"github.com/nblp/decenarch"
 	"github.com/nblp/decenarch/protocol"
+	"golang.org/x/net/html"
+
+	urlpkg "net/url"
 
 	cosiservice "github.com/dedis/cothority/cosi/service"
 
@@ -20,8 +26,6 @@ import (
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"
 )
-
-//	skipchain "github.com/dedis/cothority/skipchain"
 
 // Used for tests
 var templateID onet.ServiceID
@@ -46,67 +50,82 @@ type Service struct {
 // than one structure.
 const storageID = "main"
 
-// storage is used to save our data.
 type storage struct {
-	webarchive map[string]webstore
-
 	sync.Mutex
-}
-
-// webstore is used to store website
-type webstore struct {
-	Url       string
-	Sig       *cosiservice.SignatureResponse
-	Page      []byte
-	Timestamp string
 }
 
 // SaveRequest is the function called by the service when a client want to save a website in the
 // archive.
 func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new SaveRequest")
-	// find a consensus on webpage
 	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(decenarch.ErrorParse, "couldn't create tree")
 	}
+
+	// IMPROVEMENT threshold should be easily configurable
+	threshold := int32(math.Ceil(float64(len(tree.Roster.List)) * 0.8))
+
 	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
 	pi.(*protocol.SaveMessage).Url = req.Url
 	// IMPROVEMENT threshold could not be hardcoded
-	pi.(*protocol.SaveMessage).Threshold = uint32(math.Ceil(float64(len(tree.Roster.List)) * 0.8))
+	pi.(*protocol.SaveMessage).Threshold = threshold
 	go pi.Start()
 	// sign the consensus website found
+	var realUrl string = <-pi.(*protocol.SaveMessage).StringChan
+	var contentType string = <-pi.(*protocol.SaveMessage).StringChan
 	var msgToSign []byte = <-pi.(*protocol.SaveMessage).MsgToSign
 	cosiClient := cosiservice.NewClient()
 	sig, sigErr := cosiClient.SignatureRequest(req.Roster, msgToSign)
 	if sigErr != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
-	web := webstore{
-		Url:       req.Url,
-		Sig:       sig,
-		Page:      msgToSign,
-		Timestamp: time.Now().Format("2006.01.02.15:04"),
+	mainTimestamp := time.Now().Format("2006/01/02 15:04")
+	webmain := decenarch.Webstore{
+		Url:         realUrl,
+		ContentType: contentType,
+		Sig:         sig,
+		Page:        base64.StdEncoding.EncodeToString(msgToSign),
+		AddsUrl:     make([]string, 0),
+		Timestamp:   mainTimestamp,
 	}
-	log.Lvl4("Create stored request", string(web.Page))
-	// store result in Skipchain: TODO done in other cothority
-	//skipchainClient := skipchain.NewClient()
-	//block, blocErr := skipchainClient.CreateGenesis(
-	//	req.Roster, 2, 2,
-	//	skipchain.VerificationStandard, web, nil)
-	//if blocErr != nil {
-	//	return nil, onet.NewClientErrorCode(4042, blocErr.Error())
-	//}
-	//// TODO control if skipchain already exist
-	//skipResp, storErr := skipchainClient.StoreSkipBlock(block, nil, nil)
-	//if storErr != nil {
-	//	return nil, onet.NewClientErrorCode(4042, storErr.Error())
-	//}
-
-	// TODO relaunch it for all additional ressources
+	log.Lvl4("Create stored request")
+	// consensus protocol for all additional ressources
+	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
+	bytePage, byteErr := base64.StdEncoding.DecodeString(webmain.Page)
+	addsLinks := make([]string, 0)
+	if byteErr != nil {
+		addsLinks = ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
+	}
+	for _, al := range addsLinks {
+		log.Lvl4("Get additional", al)
+		api, aerr := s.CreateProtocol(protocol.SaveName, tree)
+		if aerr == nil {
+			api.(*protocol.SaveMessage).Url = al
+			api.(*protocol.SaveMessage).Threshold = threshold
+			go api.Start()
+			ru := <-api.(*protocol.SaveMessage).StringChan
+			ct := <-api.(*protocol.SaveMessage).StringChan
+			mts := <-api.(*protocol.SaveMessage).MsgToSign
+			as, asE := cosiClient.SignatureRequest(req.Roster, mts)
+			if asE == nil {
+				aweb := decenarch.Webstore{
+					Url:         ru,
+					ContentType: ct,
+					Sig:         as,
+					Page:        base64.StdEncoding.EncodeToString(mts),
+					AddsUrl:     make([]string, 0),
+					Timestamp:   mainTimestamp}
+				webadds = append(webadds, aweb)
+				webmain.AddsUrl = append(webmain.AddsUrl, al)
+			}
+		}
+	}
+	skipclient := decenarch.NewSkipClient()
+	skipclient.SkipAddData(req.Roster, webadds)
 
 	resp := &decenarch.SaveResponse{}
 	return resp, nil
@@ -209,4 +228,54 @@ func newService(c *onet.Context) onet.Service {
 		log.Error(err)
 	}
 	return s
+}
+
+// ExtractPageExternalLinks take html webpage as a buffer and extract the
+// links to the additional ressources needed to display the webpage.
+// "Additional ressources" means :
+//    - css file
+//    - images
+func ExtractPageExternalLinks(pageUrl string, page *bytes.Buffer) []string {
+	log.Lvl4("Parsing parent page")
+	var links []string
+	// parse page to extract links
+	tokensPage := html.NewTokenizer(page)
+	for tok := tokensPage.Next(); tok != html.ErrorToken; tok = tokensPage.Next() {
+		tagName, _ := tokensPage.TagName()
+		// extract attribute
+		attributeMap := make(map[string]string)
+		for moreAttr := true; moreAttr; {
+			attrKey, attrValue, isMore := tokensPage.TagAttr()
+			moreAttr = isMore
+			attributeMap[string(attrKey)] = string(attrValue)
+		}
+		// check for relevant ressources
+		if tok == html.StartTagToken || tok == html.SelfClosingTagToken {
+			if string(tagName) == "link" && attributeMap["rel"] == "stylesheet" {
+				links = append(links, attributeMap["href"])
+			} else if string(tagName) == "img" {
+				links = append(links, attributeMap["src"])
+			}
+		}
+	}
+	// turns found links into web-requestable links
+	var requestLinks []string = make([]string, 0)
+	urlStruct, urlErr := urlpkg.Parse(pageUrl)
+	if urlErr != nil {
+		return make([]string, 0)
+	}
+	for _, link := range links {
+		urlS, urlE := urlpkg.Parse(link)
+		if urlE == nil {
+			if urlS.IsAbs() {
+				requestLinks = append(requestLinks, link)
+			} else {
+				reqLink, reqErr := urlStruct.Parse(link)
+				if reqErr == nil {
+					requestLinks = append(requestLinks, reqLink.String())
+				}
+			}
+		}
+	}
+	return requestLinks
 }

@@ -48,6 +48,13 @@ func main() {
 				},
 			},
 		},
+		{
+			Name:      "skipstart",
+			Usage:     "start the storing skipchain",
+			Aliases:   []string{"k"},
+			ArgsUsage: groupsDef,
+			Action:    cmdSkipStart,
+		},
 	}
 	cliApp.Flags = []cli.Flag{
 		app.FlagDebug,
@@ -122,6 +129,19 @@ func cmdSave(c *cli.Context) error {
 		log.Fatal("When asking to save", url, ":", err)
 	}
 	log.Info("Website", url, "saved.", resp)
+	return nil
+}
+
+// Start the skipchain that will be responsible to store the websites archived
+func cmdSkipStart(c *cli.Context) error {
+	log.Info("SkipStart command")
+	group := readGroup(c)
+	client := decenarch.NewSkipClient()
+	resp, err := client.SkipStart(group.Roster)
+	if err != nil {
+		log.Fatal("When asking to start skipchain", err)
+	}
+	log.Info("Skipchain started with", resp)
 	return nil
 }
 

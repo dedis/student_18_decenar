@@ -235,6 +235,9 @@ func explicitNodeToNode(en ExplicitNode) AnonNode {
 // outputs a pointer to an AnonNode that correspond to the root of a tree of
 // AnonNodes.
 func convertToAnonTree(explicitTree []ExplicitNode) *AnonNode {
+	if explicitTree == nil || len(explicitTree) == 0 {
+		return nil
+	}
 	// this list is used to link an explicit node with a node in the
 	// constructed tree we have the correspondance:
 	//               explicitTree[i] <---> treeNodes[i]
