@@ -37,6 +37,7 @@ type SkipStartRequest struct {
 }
 
 type SkipStartResponse struct {
+	Msg string
 }
 
 type SkipStopRequest struct {

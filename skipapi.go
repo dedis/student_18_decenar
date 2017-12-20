@@ -48,6 +48,7 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientE
 		}
 	}
 	if len(errs) > 0 {
+		log.Error(errs)
 		return nil, errs[0]
 	}
 	return resp, nil

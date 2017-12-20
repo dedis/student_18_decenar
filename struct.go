@@ -58,7 +58,7 @@ type RetrieveResponse struct {
 // Webstore is used to store website
 // - Url is the address of the page
 // - ContentType is the MIME TYPE
-// - Sig is the collective signature for the page
+// - Sig is the collective signature for  base64.StdEncoding.DecodeString(Page)
 // - Page is a base64 string representing a []byte
 // - AddsUrl is the urls of the attached additional ressources
 // - Timestamp is the time at which the page was retrieved format 2006/01/02 15:04

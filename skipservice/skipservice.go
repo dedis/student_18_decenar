@@ -6,6 +6,7 @@ runs on the node.
 */
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -60,7 +61,7 @@ func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) 
 		2,
 		2,
 		skipchain.VerificationStandard,
-		make([]decenarch.Webstore, 0),
+		nil,
 		nil)
 	if err != nil {
 		return nil, err
@@ -74,8 +75,10 @@ func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) 
 
 // SkipStartRequest TODO documentation + probably debug/improve things
 func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decenarch.SkipStartResponse, onet.ClientError) {
+	log.Lvl1("SkipStartRequest execution")
 	skipclient := skipchain.NewClient()
 	go func() {
+		log.Lvl1("SkipStartRequest - Begin blocks creation's loop")
 		for !s.stopsignal {
 			upresp, uperr := skipclient.GetUpdateChain(
 				req.Roster, req.Genesis.Hash)
@@ -84,9 +87,13 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 			} else {
 				s.skipstorage.Lock()
 				l := len(s.skipstorage.Skipchain)
-				s.skipstorage.Skipchain = append(
-					s.skipstorage.Skipchain[:l-1],
-					upresp.Update...)
+				if l == 0 {
+					s.skipstorage.Skipchain = upresp.Update
+				} else {
+					s.skipstorage.Skipchain = append(
+						s.skipstorage.Skipchain[:l-1],
+						upresp.Update...)
+				}
 				l = len(s.skipstorage.Skipchain)
 				s.skipstorage.LastSkipBlockID = s.skipstorage.Skipchain[l-1].Hash
 				s.skipstorage.Unlock()
@@ -94,20 +101,25 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 			s.skipstorage.Lock()
 			latest := s.skipstorage.Skipchain[len(s.skipstorage.Skipchain)-1]
 			s.skipstorage.Unlock()
-			resp, err := skipclient.StoreSkipBlock(latest, req.Roster, s.data)
-			if err != nil {
-				log.Error(err)
+			bData, bErr := webstoreExtractAndConvert(s.data)
+			if bErr != nil {
+				log.Error(bErr)
 			} else {
-				s.skipstorage.Lock()
-				s.skipstorage.LastSkipBlockID = resp.Latest.Hash
-				s.skipstorage.Unlock()
-				s.data = make([]decenarch.Webstore, 0)
-				s.save()
+				resp, err := skipclient.StoreSkipBlock(latest, req.Roster, bData)
+				if err != nil {
+					log.Error(err)
+				} else {
+					s.skipstorage.Lock()
+					s.skipstorage.LastSkipBlockID = resp.Latest.Hash
+					s.skipstorage.Unlock()
+					s.data = make([]decenarch.Webstore, 0)
+					s.save()
+				}
 			}
 			time.Sleep(10 * time.Minute)
 		}
 	}()
-	return nil, nil
+	return &decenarch.SkipStartResponse{Msg: "Blocks creation's loop launched"}, nil
 }
 
 // SkipStopRequest sends a signal to the service to stop the loop of skipblock creation
@@ -196,4 +208,15 @@ func newService(c *onet.Context) onet.Service {
 		log.Error(err)
 	}
 	return s
+}
+
+// webstoreExtractAndConvert takes an array of Webstore and do three things:
+//    1 extract the useful subset of the data contained in the Webstore
+//      to be stored in the skipchain
+//    2 convert the extracted data into a []byte format or any format
+//      understood by the skipchain API
+//    3 if the subset is not all the set, store the Webstore on disk
+func webstoreExtractAndConvert(webarray []decenarch.Webstore) ([]byte, error) {
+	b, err := json.Marshal(webarray)
+	return b, err
 }
