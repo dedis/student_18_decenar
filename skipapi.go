@@ -88,6 +88,20 @@ func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataR
 // were stored on the skipchain. Time format is "2006/01/02 15:04". url must
 // be given with scheme.
 func (c *SkipClient) SkipGetData(r *onet.Roster, url string, time string) (*SkipGetDataResponse, onet.ClientError) {
+	log.Lvl1("SkipGetData")
 	// TODO
+	resp := &SkipGetDataResponse{}
+	dst := r.RandomServerIdentity()
+	err := c.SendProtobuf(
+		dst,
+		&SkipGetDataRequest{
+			Roster:    r,
+			Url:       url,
+			Timestamp: time,
+		},
+		resp)
+	if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }

@@ -5,7 +5,7 @@ This holds the messages used to communicate with the service over the network.
 */
 
 import (
-	cosiservice "github.com/dedis/cothority/cosi/service"
+	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/network"
 )
@@ -41,18 +41,15 @@ type SaveResponse struct {
 // RetrieveRequest will retreive the website from the conode using the protocol
 // and return the website file
 type RetrieveRequest struct {
-	Url    string
-	Roster *onet.Roster
+	Url       string
+	Roster    *onet.Roster
+	Timestamp string
 }
 
 // RetrieveResponse return the website requested.
-// - Data is the map containing the raw data of the website. The key is the
-// path to the page in the cache.
-// - Website is the path in the cache to the requested page. It MUST BE a valid
-// key of Data
+// - Path is the path to the page requested on the filesystem
 type RetrieveResponse struct {
-	Website string
-	Data    map[string][]byte
+	Path string
 }
 
 // Webstore is used to store website

@@ -47,5 +47,6 @@ func (c *Client) Retrieve(r *onet.Roster, url string) (*RetrieveResponse, onet.C
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Page is available at", resp.Path)
 	return resp, nil
 }

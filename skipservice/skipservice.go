@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	skipchain "github.com/dedis/cothority/skipchain"
 	"github.com/nblp/decenarch"
+	skipchain "gopkg.in/dedis/cothority.v1/skipchain"
 
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
@@ -80,6 +80,7 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 	go func() {
 		log.Lvl1("SkipStartRequest - Begin blocks creation's loop")
 		for !s.stopsignal {
+			// update skipchain
 			upresp, uperr := skipclient.GetUpdateChain(
 				req.Roster, req.Genesis.Hash)
 			if uperr != nil {
@@ -101,6 +102,7 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 			s.skipstorage.Lock()
 			latest := s.skipstorage.Skipchain[len(s.skipstorage.Skipchain)-1]
 			s.skipstorage.Unlock()
+			// store data in nextblock
 			bData, bErr := webstoreExtractAndConvert(s.data)
 			if bErr != nil {
 				log.Error(bErr)
@@ -129,22 +131,59 @@ func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarc
 }
 
 func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, onet.ClientError) {
+	// TODO verify cosi signature before adding data
+	// TODO verify signature by EVERY conodes in the skipchain roster
 	s.data = append(s.data, req.Data...)
 	return &decenarch.SkipAddDataResponse{}, nil
 }
 
 func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*decenarch.SkipGetDataResponse, onet.ClientError) {
-	skipclient := skipchain.NewClient()
-	resp, err := skipclient.GetAllSkipchains(req.Roster.RandomServerIdentity())
-	if err != nil {
-		return nil, err
+	s.skipstorage.Lock()
+	lastKnowID := s.skipstorage.LastSkipBlockID
+	s.skipstorage.Unlock()
+	tReq, trErr := time.Parse("2006/01/02 15:04", req.Timestamp)
+	if trErr != nil {
+		return nil, onet.NewClientError(trErr)
 	}
-	// TODO extract correct skipchain from resp
-	log.Lvl4(resp)
-	// TODO extract correct block from url/timestamp
-	// TODO extract correct website as well as associated data
-	// TODO return the []Webstore retrieved
-	return nil, nil
+
+	skipclient := skipchain.NewClient()
+	// get last block
+	resp, rErr := skipclient.GetUpdateChain(req.Roster, lastKnowID)
+	if rErr != nil {
+		return nil, rErr
+	}
+	lastKnowBlock := resp.Update[len(resp.Update)-1]
+	lastKnowID = lastKnowBlock.Hash
+	// get whole skip chain once
+	allResp, alErr := skipclient.GetUpdateChain(req.Roster, lastKnowBlock.GenesisID)
+	if alErr != nil {
+		return nil, alErr
+	}
+	for _, block := range allResp.Update {
+		// test if data contains the correct (url,timestamp) couple
+		var mainPage decenarch.Webstore
+		webs, wErr := webstoreCompleteFromBytes(block.Data)
+		for _, webpage := range webs {
+			tBlock, tbErr := time.Parse("2006/01/02 15:04", webpage.Timestamp)
+			if tbErr == nil {
+				if webpage.Url == req.Url && (tReq.Equal(tBlock) || tReq.After(tBlock)) {
+					mainPage = webpage
+					break
+				}
+			}
+		}
+		// check if a mainPage was found
+		if mainPage.Url != "" {
+			// TODO eventually include verification key for skipblock
+			finalResp := decenarch.SkipGetDataResponse{
+				MainPage: mainPage,
+				AllPages: webs,
+			}
+			return &finalResp, nil
+		}
+	}
+
+	return nil, onet.NewClientErrorCode(4242, "Could not find block in skipchain")
 }
 
 // NewProtocol is called on all nodes of a Tree (except the root, since it is
@@ -219,4 +258,13 @@ func newService(c *onet.Context) onet.Service {
 func webstoreExtractAndConvert(webarray []decenarch.Webstore) ([]byte, error) {
 	b, err := json.Marshal(webarray)
 	return b, err
+}
+
+func webstoreCompleteFromBytes(data []byte) ([]decenarch.Webstore, error) {
+	var webs []decenarch.Webstore
+	err := json.Unmarshal(data, &webs)
+	if err != nil {
+		return nil, err
+	}
+	return webs, nil
 }

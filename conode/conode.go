@@ -14,11 +14,11 @@ package main
 
 import (
 	// Here you can import any other needed service for your conode.
-	_ "github.com/dedis/cothority/cosi/service"
-	_ "github.com/dedis/cothority/skipchain"
-	_ "github.com/dedis/cothority/status/service"
 	_ "github.com/nblp/decenarch/service"
 	_ "github.com/nblp/decenarch/skipservice"
+	_ "gopkg.in/dedis/cothority.v1/cosi/service"
+	_ "gopkg.in/dedis/cothority.v1/skipchain"
+	_ "gopkg.in/dedis/cothority.v1/status/service"
 	"gopkg.in/dedis/onet.v1/app"
 )
 

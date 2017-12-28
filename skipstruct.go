@@ -5,7 +5,7 @@ This holds the messages used to communicate with the service over the network.
 */
 
 import (
-	skipchain "github.com/dedis/cothority/skipchain"
+	skipchain "gopkg.in/dedis/cothority.v1/skipchain"
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/network"
 )
@@ -53,6 +53,7 @@ type SkipAddDataRequest struct {
 }
 
 type SkipAddDataResponse struct {
+	W *Webstore
 }
 
 type SkipGetDataRequest struct {
@@ -62,4 +63,6 @@ type SkipGetDataRequest struct {
 }
 
 type SkipGetDataResponse struct {
+	MainPage Webstore
+	AllPages []Webstore
 }

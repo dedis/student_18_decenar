@@ -9,20 +9,23 @@ import (
 	"bytes"
 	"errors"
 	"math"
+	"os"
+	"path"
+	"strings"
 	"sync"
 	"time"
 
 	"encoding/base64"
+	urlpkg "net/url"
 
 	"github.com/nblp/decenarch"
 	"github.com/nblp/decenarch/protocol"
 	"golang.org/x/net/html"
 
-	urlpkg "net/url"
-
-	cosiservice "github.com/dedis/cothority/cosi/service"
+	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
 
 	"gopkg.in/dedis/onet.v1"
+	"gopkg.in/dedis/onet.v1/crypto"
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"
 )
@@ -49,6 +52,7 @@ type Service struct {
 // storageID reflects the data we're storing - we could store more
 // than one structure.
 const storageID = "main"
+const cachePath = "/tmp/cocache"
 
 type storage struct {
 	sync.Mutex
@@ -78,8 +82,8 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	var realUrl string = <-pi.(*protocol.SaveMessage).StringChan
 	var contentType string = <-pi.(*protocol.SaveMessage).StringChan
 	var msgToSign []byte = <-pi.(*protocol.SaveMessage).MsgToSign
-	cosiClient := cosiservice.NewClient()
-	sig, sigErr := cosiClient.SignatureRequest(req.Roster, msgToSign)
+	cosiclient := cosiservice.NewClient()
+	sig, sigErr := cosiclient.SignatureRequest(req.Roster, msgToSign)
 	if sigErr != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
@@ -110,7 +114,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 			ru := <-api.(*protocol.SaveMessage).StringChan
 			ct := <-api.(*protocol.SaveMessage).StringChan
 			mts := <-api.(*protocol.SaveMessage).MsgToSign
-			as, asE := cosiClient.SignatureRequest(req.Roster, mts)
+			as, asE := cosiclient.SignatureRequest(req.Roster, mts)
 			if asE == nil {
 				aweb := decenarch.Webstore{
 					Url:         ru,
@@ -134,43 +138,43 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 // RetrieveRequest
 func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new RetrieveRequest")
-	//	s.storage.Lock()
-	//	defer s.storage.Unlock()
-	//	if web, isSaved := s.storage.webarchive[req.Url]; isSaved {
-	//		// retrive website
-	//		log.Lvl4("Retrive Website Raw Data")
-	//		tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
-	//		if tree == nil {
-	//			return nil, onet.NewClientErrorCode(template.ErrorParse, "couldn't create tree")
-	//		}
-	//		pi, err := s.CreateProtocol(protocol.RetrieveName, tree)
-	//		if err != nil {
-	//			return nil, onet.NewClientErrorCode(4043, err.Error())
-	//		}
-	//		pi.(*protocol.RetrieveMessage).Url = web.Url
-	//		go pi.Start()
-	//		website := <-pi.(*protocol.RetrieveMessage).ParentPath
-	//		data := <-pi.(*protocol.RetrieveMessage).Data
-	//		// (cosi) control signature
-	//		log.Lvl4("Verify Website Signature")
-	//		voFile, voErr := ioutil.ReadFile(website)
-	//		if voErr != nil {
-	//			log.Lvl4("Verification error: cannot read file")
-	//			return nil, onet.NewClientErrorCode(4043, voErr.Error())
-	//		}
-	//		sig := web.Sig
-	//		vErr := VerificationSignature(voFile, sig, req.Roster)
-	//		if vErr != nil {
-	//			log.Lvl4("Verification error: cannot verify signature", vErr)
-	//			return nil, onet.NewClientErrorCode(4043, vErr.Error())
-	//		}
-	//		log.Lvl4("Verification Done.")
-	//		return &template.RetrieveResponse{Website: website, Data: data}, nil
-	//	} else {
-	//		log.Lvl3("storage:\n", s.storage.webarchive)
-	//		return nil, onet.NewClientErrorCode(template.ErrorParse, "website requested was not saved")
-	//	}
-	return nil, nil
+	returnResp := decenarch.RetrieveResponse{}
+	skipclient := decenarch.NewSkipClient()
+	resp, err := skipclient.SkipGetData(req.Roster, req.Url, req.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+	mainPage := resp.MainPage.Page
+	bPage, bErr := base64.StdEncoding.DecodeString(mainPage)
+	if bErr != nil {
+		return nil, onet.NewClientError(bErr)
+	}
+	// verify signature
+	vsigErr := crypto.VerifySignature(
+		req.Roster.List[0].Suite(),
+		req.Roster.Aggregate,
+		bPage,
+		Sig.Signature)
+	if vsigErr != nil {
+		return nil, onet.NewClientError(vsigErr)
+	}
+	p, swdErr := storeWebPageOnDisk(resp.MainPage.Url, bPage)
+	returnResp.Path = p
+	if swdErr != nil {
+		return nil, swdErr
+	}
+	for _, addUrl := range resp.MainPage.AddsUrl {
+		for _, addPage := range resp.AllPages {
+			if addUrl == addPage.Url {
+				// TODO verify cosi signature
+				baPage, baErr := base64.StdEncoding.DecodeString(addPage.Page)
+				if baErr == nil {
+					storeWebPageOnDisk(addPage.Url, baPage)
+				}
+			}
+		}
+	}
+	return &returnResp, nil
 }
 
 // NewProtocol is called on all nodes of a Tree (except the root, since it is
@@ -278,4 +282,32 @@ func ExtractPageExternalLinks(pageUrl string, page *bytes.Buffer) []string {
 		}
 	}
 	return requestLinks
+}
+
+func storeWebPageOnDisk(mUrl string, bData []byte) (string, onet.ClientError) {
+	pUrl, puErr := urlpkg.Parse(mUrl)
+	if puErr != nil {
+		return "", onet.NewClientError(puErr)
+	}
+	var urlDir string
+	for _, dom := range strings.Split(pUrl.Host, ".") {
+		urlDir = dom + "/" + urlDir
+	}
+	locDir, locFile := path.Split(pUrl.Path)
+	if locFile == "" {
+		locFile = "index.html"
+	}
+	mkErr := os.MkdirAll(path.Join(cachePath, urlDir, locDir), 700)
+	if mkErr != nil {
+		return "", onet.NewClientError(mkErr)
+	}
+	mainFile, mfErr := os.Create(path.Join(cachePath, urlDir, locDir, locFile))
+	if mfErr != nil {
+		return "", onet.NewClientError(mfErr)
+	}
+	_, writErr := mainFile.Write(bData)
+	if writErr != nil {
+		return "", onet.NewClientError(writErr)
+	}
+	return path.Join(cachePath, urlDir, locDir, locFile), nil
 }
