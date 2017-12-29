@@ -9,6 +9,8 @@ This part of the service runs on the client or the app.
 */
 
 import (
+	"time"
+
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
 )
@@ -36,9 +38,14 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientE
 	if err != nil {
 		return nil, err
 	}
+	log.Lvl1("rootResp:", rootResp, "and error:", err)
 	resp := &SkipStartResponse{}
 	errs := make([]onet.ClientError, 0)
 	for _, srv := range r.List {
+		// NOTE sleep sometimes necessary to avoid conflicts in creation
+		time.Sleep(2 * time.Second)
+		log.Lvl4("send SkipStartRequest to:", srv)
+		resp = &SkipStartResponse{}
 		err := c.SendProtobuf(
 			srv,
 			&SkipStartRequest{Roster: r, Genesis: rootResp.Bloc},
@@ -46,6 +53,7 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientE
 		if err != nil {
 			errs = append(errs, err)
 		}
+		log.Lvl4("received SkipStartResponse:", resp, "and error", err)
 	}
 	if len(errs) > 0 {
 		log.Error(errs)
@@ -81,6 +89,7 @@ func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataR
 	if err != nil {
 		return nil, err
 	}
+	log.Lvl1("SkipAddData done sucessfully")
 	return resp, nil
 }
 
@@ -89,7 +98,6 @@ func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataR
 // be given with scheme.
 func (c *SkipClient) SkipGetData(r *onet.Roster, url string, time string) (*SkipGetDataResponse, onet.ClientError) {
 	log.Lvl1("SkipGetData")
-	// TODO
 	resp := &SkipGetDataResponse{}
 	dst := r.RandomServerIdentity()
 	err := c.SendProtobuf(
@@ -103,5 +111,5 @@ func (c *SkipClient) SkipGetData(r *onet.Roster, url string, time string) (*Skip
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return resp, nil
 }

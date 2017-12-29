@@ -9,9 +9,6 @@ import (
 	"bytes"
 	"errors"
 	"math"
-	"os"
-	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -52,7 +49,6 @@ type Service struct {
 // storageID reflects the data we're storing - we could store more
 // than one structure.
 const storageID = "main"
-const cachePath = "/tmp/cocache"
 
 type storage struct {
 	sync.Mutex
@@ -101,7 +97,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
 	bytePage, byteErr := base64.StdEncoding.DecodeString(webmain.Page)
 	addsLinks := make([]string, 0)
-	if byteErr != nil {
+	if byteErr == nil {
 		addsLinks = ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
 	}
 	for _, al := range addsLinks {
@@ -128,6 +124,8 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 			}
 		}
 	}
+	webadds = append(webadds, webmain)
+	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := decenarch.NewSkipClient()
 	skipclient.SkipAddData(req.Roster, webadds)
 
@@ -139,38 +137,36 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, onet.ClientError) {
 	log.Lvl3("Decenarch Service new RetrieveRequest")
 	returnResp := decenarch.RetrieveResponse{}
+	returnResp.Adds = make([]decenarch.Webstore, 0)
 	skipclient := decenarch.NewSkipClient()
 	resp, err := skipclient.SkipGetData(req.Roster, req.Url, req.Timestamp)
 	if err != nil {
 		return nil, err
 	}
+	log.Lvl4("service-RetrieveRequest-skipchain response")
+	log.Lvl4("the response:", resp, "and the error", err)
+	returnResp.Main = resp.MainPage
 	mainPage := resp.MainPage.Page
 	bPage, bErr := base64.StdEncoding.DecodeString(mainPage)
 	if bErr != nil {
 		return nil, onet.NewClientError(bErr)
 	}
-	// verify signature
-	vsigErr := crypto.VerifySignature(
-		req.Roster.List[0].Suite(),
+	// TODO verify signature error here 65 bits instead of 64
+	//log.Lvl4("service-RetrieveRequest-verify signature")
+	vsigErr := crypto.VerifySchnorr(
+		network.Suite,
 		req.Roster.Aggregate,
 		bPage,
-		Sig.Signature)
+		resp.MainPage.Sig.Signature)
 	if vsigErr != nil {
-		return nil, onet.NewClientError(vsigErr)
-	}
-	p, swdErr := storeWebPageOnDisk(resp.MainPage.Url, bPage)
-	returnResp.Path = p
-	if swdErr != nil {
-		return nil, swdErr
+		log.Lvl1(vsigErr)
+		//return nil, onet.NewClientError(vsigErr)
 	}
 	for _, addUrl := range resp.MainPage.AddsUrl {
 		for _, addPage := range resp.AllPages {
 			if addUrl == addPage.Url {
 				// TODO verify cosi signature
-				baPage, baErr := base64.StdEncoding.DecodeString(addPage.Page)
-				if baErr == nil {
-					storeWebPageOnDisk(addPage.Url, baPage)
-				}
+				returnResp.Adds = append(returnResp.Adds, addPage)
 			}
 		}
 	}
@@ -282,32 +278,4 @@ func ExtractPageExternalLinks(pageUrl string, page *bytes.Buffer) []string {
 		}
 	}
 	return requestLinks
-}
-
-func storeWebPageOnDisk(mUrl string, bData []byte) (string, onet.ClientError) {
-	pUrl, puErr := urlpkg.Parse(mUrl)
-	if puErr != nil {
-		return "", onet.NewClientError(puErr)
-	}
-	var urlDir string
-	for _, dom := range strings.Split(pUrl.Host, ".") {
-		urlDir = dom + "/" + urlDir
-	}
-	locDir, locFile := path.Split(pUrl.Path)
-	if locFile == "" {
-		locFile = "index.html"
-	}
-	mkErr := os.MkdirAll(path.Join(cachePath, urlDir, locDir), 700)
-	if mkErr != nil {
-		return "", onet.NewClientError(mkErr)
-	}
-	mainFile, mfErr := os.Create(path.Join(cachePath, urlDir, locDir, locFile))
-	if mfErr != nil {
-		return "", onet.NewClientError(mfErr)
-	}
-	_, writErr := mainFile.Write(bData)
-	if writErr != nil {
-		return "", onet.NewClientError(writErr)
-	}
-	return path.Join(cachePath, urlDir, locDir, locFile), nil
 }

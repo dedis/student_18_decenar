@@ -11,6 +11,7 @@ This part of the service runs on the client or the app.
 import (
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
+	"time"
 )
 
 // ServiceName is used for registration on the onet.
@@ -40,13 +41,21 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientErr
 }
 
 // Retrieve will send the website requested to the client
-func (c *Client) Retrieve(r *onet.Roster, url string) (*RetrieveResponse, onet.ClientError) {
+func (c *Client) Retrieve(r *onet.Roster, url string, timestamp string) (*RetrieveResponse, onet.ClientError) {
+	// if no timestamp is given, take 'now as timestamp'
+	if timestamp == "" {
+		t := time.Now()
+		timestamp = t.Format("2006/01/02 15:04")
+	}
 	resp := &RetrieveResponse{}
 	dst := r.RandomServerIdentity()
-	err := c.SendProtobuf(dst, &RetrieveRequest{Roster: r, Url: url}, resp)
+	err := c.SendProtobuf(
+		dst,
+		&RetrieveRequest{Roster: r, Url: url, Timestamp: timestamp},
+		resp)
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Page is available at", resp.Path)
+	log.Info("Page", resp.Main.Url, "sucessfully retrieved!")
 	return resp, nil
 }

@@ -38,12 +38,16 @@ type SkipService struct {
 	skipstorage *skipstorage
 	stopsignal  bool
 
-	data []decenarch.Webstore
+	data     []decenarch.Webstore
+	dataChan chan decenarch.Webstore
 }
 
-// storageID reflects the data we're storing - we could store more
+// skipstorageID reflects the data we're storing - we could store more
 // than one structure.
 const skipstorageID = "main"
+
+// skipMin is the number of minutes between each block creation
+const skipMin = 2
 
 type skipstorage struct {
 	sync.Mutex
@@ -80,6 +84,7 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 	go func() {
 		log.Lvl1("SkipStartRequest - Begin blocks creation's loop")
 		for !s.stopsignal {
+			log.Lvl3("SkipStartLoop - create new block")
 			// update skipchain
 			upresp, uperr := skipclient.GetUpdateChain(
 				req.Roster, req.Genesis.Hash)
@@ -118,7 +123,20 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 					s.save()
 				}
 			}
-			time.Sleep(10 * time.Minute)
+			// read data from dataChan for skipMin minutes
+			readTimeout := false
+			for !readTimeout {
+				log.Lvl4("Waiting for data...")
+				select {
+				case d := <-s.dataChan:
+					log.Lvl4("skipstart - data added!")
+					s.data = append(s.data, d)
+				case <-time.After(skipMin * time.Minute):
+					log.Lvl4("skipstart - data timeout!")
+					readTimeout = true
+				}
+			}
+			//time.Sleep(skipMin * time.Minute)
 		}
 	}()
 	return &decenarch.SkipStartResponse{Msg: "Blocks creation's loop launched"}, nil
@@ -131,9 +149,15 @@ func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarc
 }
 
 func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, onet.ClientError) {
+	log.Lvl4("SkipAddDataRequest - Begin")
 	// TODO verify cosi signature before adding data
 	// TODO verify signature by EVERY conodes in the skipchain roster
 	s.data = append(s.data, req.Data...)
+	for _, d := range req.Data {
+		log.Lvl4("SkipAddDataRequest - add", d)
+		s.dataChan <- d
+	}
+	log.Lvl4("SkipAddDataRequest - done")
 	return &decenarch.SkipAddDataResponse{}, nil
 }
 
@@ -156,6 +180,19 @@ func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*de
 	lastKnowID = lastKnowBlock.Hash
 	// get whole skip chain once
 	allResp, alErr := skipclient.GetUpdateChain(req.Roster, lastKnowBlock.GenesisID)
+	// NOTE this part is here for debug purpose
+	for _, b := range allResp.Update {
+		webs, wErr := webstoreCompleteFromBytes(b.Data)
+		if wErr == nil {
+			log.Lvl3("Block has:")
+			for _, w := range webs {
+				log.Lvl3("'-->", w.Url, ":", w.Timestamp)
+			}
+		} else {
+			log.Lvl3(wErr)
+		}
+	}
+	// NOTE this ends the debug purpose's part
 	if alErr != nil {
 		return nil, alErr
 	}
@@ -163,12 +200,14 @@ func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*de
 		// test if data contains the correct (url,timestamp) couple
 		var mainPage decenarch.Webstore
 		webs, wErr := webstoreCompleteFromBytes(block.Data)
-		for _, webpage := range webs {
-			tBlock, tbErr := time.Parse("2006/01/02 15:04", webpage.Timestamp)
-			if tbErr == nil {
-				if webpage.Url == req.Url && (tReq.Equal(tBlock) || tReq.After(tBlock)) {
-					mainPage = webpage
-					break
+		if wErr == nil {
+			for _, webpage := range webs {
+				tBlock, tbErr := time.Parse("2006/01/02 15:04", webpage.Timestamp)
+				if tbErr == nil {
+					if webpage.Url == req.Url && (tReq.Equal(tBlock) || tReq.After(tBlock)) {
+						mainPage = webpage
+						break
+					}
 				}
 			}
 		}
@@ -234,6 +273,7 @@ func newService(c *onet.Context) onet.Service {
 	s := &SkipService{
 		ServiceProcessor: onet.NewServiceProcessor(c),
 		data:             make([]decenarch.Webstore, 0),
+		dataChan:         make(chan decenarch.Webstore),
 	}
 	if err := s.RegisterHandlers(
 		s.SkipRootStartRequest,
@@ -256,15 +296,18 @@ func newService(c *onet.Context) onet.Service {
 //      understood by the skipchain API
 //    3 if the subset is not all the set, store the Webstore on disk
 func webstoreExtractAndConvert(webarray []decenarch.Webstore) ([]byte, error) {
+	log.Lvl4("extract and convert webstore")
 	b, err := json.Marshal(webarray)
 	return b, err
 }
 
 func webstoreCompleteFromBytes(data []byte) ([]decenarch.Webstore, error) {
-	var webs []decenarch.Webstore
+	log.Lvl4("unmarshal webstore - begin")
+	var webs []decenarch.Webstore = make([]decenarch.Webstore, 0)
 	err := json.Unmarshal(data, &webs)
 	if err != nil {
 		return nil, err
 	}
+	log.Lvl4("unmarshal webstore - success")
 	return webs, nil
 }

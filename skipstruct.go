@@ -53,7 +53,6 @@ type SkipAddDataRequest struct {
 }
 
 type SkipAddDataResponse struct {
-	W *Webstore
 }
 
 type SkipGetDataRequest struct {

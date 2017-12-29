@@ -49,7 +49,8 @@ type RetrieveRequest struct {
 // RetrieveResponse return the website requested.
 // - Path is the path to the page requested on the filesystem
 type RetrieveResponse struct {
-	Path string
+	Main Webstore
+	Adds []Webstore
 }
 
 // Webstore is used to store website

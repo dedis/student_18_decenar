@@ -1,10 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"io"
 	"os"
-	"path/filepath"
+	"path"
+	"strings"
+
+	"encoding/base64"
+	urlpkg "net/url"
 
 	decenarch "github.com/nblp/decenarch"
 
@@ -13,6 +15,9 @@ import (
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/urfave/cli.v1"
 )
+
+// path to the directory where website will be stored for consultation
+const cachePath = "/tmp/cocache"
 
 func main() {
 	log.Info("Start decenarch application")
@@ -32,6 +37,10 @@ func main() {
 				cli.StringFlag{
 					Name:  "url, u",
 					Usage: "Provide url to retrieve",
+				},
+				cli.StringFlag{
+					Name:  "timestamp, t",
+					Usage: "Provide timestamp",
 				},
 			},
 		},
@@ -66,52 +75,46 @@ func main() {
 	cliApp.Run(os.Args)
 }
 
-// cacheData save data on file system using the path provided
-func cacheData(path string, data []byte) error {
-	mErr := os.MkdirAll(filepath.Dir(path), os.ModePerm|os.ModeDir)
-	if mErr != nil {
-		log.Lvl3("Error while creating folders for", path)
-		return mErr
-	}
-	file, fErr := os.Create(path)
-	if fErr != nil {
-		log.Lvl3("Error while create file", path)
-		return fErr
-	}
-	defer file.Close()
-	_, cErr := io.Copy(file, bytes.NewReader(data))
-	if cErr != nil {
-		log.Lvl3("Error while copying data in", path)
-		return cErr
-	}
-	return nil
-}
-
 // Returns the asked website if saved.
 func cmdRetrieve(c *cli.Context) error {
 	log.Info("Retrieve command")
 	url := c.String("url")
+	timestamp := c.String("timestamp")
 	if url == "" {
 		log.Fatal("Please provide an url with save -u [url] ")
 	}
+	if timestamp == "" {
+		log.Info("It is possible to provide a timestamp with -t [2006/01/02 15:04]")
+	}
 	group := readGroup(c)
 	client := decenarch.NewClient()
-	resp, err := client.Retrieve(group.Roster, url)
+	resp, err := client.Retrieve(group.Roster, url, timestamp)
 	if err != nil {
 		log.Fatal("When asking to retrieve", url, ":", err)
 	}
-	// save the website in filesystem's cache
-	prefix := decenarch.CachePath
-	for path, data := range resp.Data {
-		if string(path[0]) != "/" {
-			prefix += "/"
-		}
-		err := cacheData(prefix+path, data)
-		if err != nil {
-			log.Lvl3("Impossible to cache", path, ":", err)
+	// save data on local filesystem
+	bPage, bErr := base64.StdEncoding.DecodeString(resp.Main.Page)
+	if bErr != nil {
+		return bErr
+	}
+	p, pErr := storeWebPageOnDisk(resp.Main.Url, bPage)
+	if pErr != nil {
+		return pErr
+	}
+	log.Info("Website", url, "stored in", p)
+	for _, adds := range resp.Adds {
+		abPage, abErr := base64.StdEncoding.DecodeString(adds.Page)
+		if abErr == nil {
+			log.Info("Storing", adds.Url)
+			_, apErr := storeWebPageOnDisk(adds.Url, abPage)
+			if apErr != nil {
+				log.Lvl1("An non-fatal error occured:", apErr)
+			}
+		} else {
+			log.Lvl1("An non-fatal error occured:", abErr)
 		}
 	}
-	log.Info("Website", url, "retrieved in", prefix+resp.Website)
+	log.Info("Website sucessfully stored in", p)
 	return nil
 }
 
@@ -159,4 +162,32 @@ func readGroup(c *cli.Context) *app.Group {
 			name)
 	}
 	return group
+}
+
+func storeWebPageOnDisk(mUrl string, bData []byte) (string, error) {
+	pUrl, puErr := urlpkg.Parse(mUrl)
+	if puErr != nil {
+		return "", puErr
+	}
+	var urlDir string
+	for _, dom := range strings.Split(pUrl.Host, ".") {
+		urlDir = dom + "/" + urlDir
+	}
+	locDir, locFile := path.Split(pUrl.Path)
+	if locFile == "" {
+		locFile = "index.html"
+	}
+	mkErr := os.MkdirAll(path.Join(cachePath, urlDir, locDir), os.ModePerm|os.ModeDir)
+	if mkErr != nil {
+		return "", mkErr
+	}
+	mainFile, mfErr := os.Create(path.Join(cachePath, urlDir, locDir, locFile))
+	if mfErr != nil {
+		return "", mfErr
+	}
+	_, writErr := mainFile.Write(bData)
+	if writErr != nil {
+		return "", writErr
+	}
+	return path.Join(cachePath, urlDir, locDir, locFile), nil
 }
