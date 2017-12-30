@@ -47,6 +47,7 @@ type SkipService struct {
 const skipstorageID = "main"
 
 // skipMin is the number of minutes between each block creation
+// TODO put back to 10
 const skipMin = 2
 
 type skipstorage struct {
