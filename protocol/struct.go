@@ -9,15 +9,16 @@ so that it can find out who sent the message.
 
 import (
 	"golang.org/x/net/html"
+
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/crypto"
-	"gopkg.in/dedis/onet.v1/network"
+
+	"gopkg.in/dedis/crypto.v0/abstract"
 )
 
 // Name can be used from other packages to refer to this protocol.
 const Name = "Decenarch"
 const SaveName = Name + "Save"
-const RetrieveName = Name + "Retrieve"
 
 // ***************** Struct for DecenarchSave ****************************** //
 
@@ -41,10 +42,11 @@ const (
 //     MasterTree : the tree representing structured data with its signatures
 //     MasterHash : the hash representing unstructured data with its signatures
 type SaveAnnounce struct {
-	Phase      SavePhase
-	Url        string
-	MasterTree []ExplicitNode //*AnonNode
-	MasterHash map[string]map[*network.ServerIdentity]crypto.SchnorrSig
+	Phase         SavePhase
+	Url           string
+	MasterTree    []ExplicitNode
+	MasterTreeSig crypto.SchnorrSig
+	MasterHash    map[string]map[abstract.Point]crypto.SchnorrSig
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -59,18 +61,30 @@ type StructSaveAnnounce struct {
 //     Phase : the phase the protocol is currently
 //     Url : the url of the webpage the conodes will reach consensus on
 //     Errs : the errors that happends during the protocol
-//     MasterTree : the tree representing structured data with its signatures
+//     MasterTree : the tree representing structured data anonymised
+//     MasterTreeSig : the signature of the root of the tree, creator of MasterTree
 //     MasterHash : the hash representing unstructured data with its signatures
+//
+//     SeenMap : the map of the Seen field of each service of each conode. the
+//               keys are the public keys of the conode.
+//     SigMap : the map of the signature associatied with the Seen field of each
+//              conodes. For a given public key (abstract.Point) both SigMap and
+//              SeenMap must have an entry
+//
 //     RequestedNode : the map linking the hash of an AnonNode's data with its
 //                     plaintext html data.
 //     RequestedData : the map linking the hash of an unstructured data with
 //                     its plaintext data.
 type SaveReply struct {
-	Phase      SavePhase
-	Url        string
-	Errs       []error
-	MasterTree []ExplicitNode //*AnonNode
-	MasterHash map[string]map[*network.ServerIdentity]crypto.SchnorrSig
+	Phase         SavePhase
+	Url           string
+	Errs          []error
+	MasterTree    []ExplicitNode //*AnonNode
+	MasterTreeSig crypto.SchnorrSig
+	MasterHash    map[string]map[abstract.Point]crypto.SchnorrSig
+
+	SeenMap map[abstract.Point][]byte
+	SigMap  map[abstract.Point]crypto.SchnorrSig
 
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte
@@ -81,32 +95,4 @@ type SaveReply struct {
 type StructSaveReply struct {
 	*onet.TreeNode
 	SaveReply
-}
-
-// ***************** Struct for DecenarchRetrieve ************************** //
-
-// RetrieveAnnounce is used to pass a message to the children when the protocol
-// called is DecenarchRetrieve
-type RetrieveAnnounce struct {
-	Url string
-}
-
-// StructRetrieveAnnounce just contains RetrieveAnnounce and the data necessary
-// to identify and process the message in the sda framework
-type StructRetrieveAnnounce struct {
-	*onet.TreeNode
-	RetrieveAnnounce
-}
-
-// RetrieveReply return the data of the requested webpage. The key of the map
-// is the path that must be used to save the file in the cache.
-type RetrieveReply struct {
-	Data map[string][]byte
-}
-
-// StructRetrieveReply just contains RetrieveReply and the data necessary
-// to identify and process the message in the sda framework
-type StructRetrieveReply struct {
-	*onet.TreeNode
-	RetrieveReply
 }

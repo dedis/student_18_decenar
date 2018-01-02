@@ -1,9 +1,9 @@
 package protocol
 
+// TODO control + adapt documentation
+
 import (
 	"errors"
-	"gopkg.in/dedis/onet.v1/crypto"
-	"gopkg.in/dedis/onet.v1/network"
 )
 
 /*
@@ -12,16 +12,16 @@ and that are not used as interface to communicate from one conode to another.
 
 More precisely, it contains:
 - The structure and the methods used to convert a tree to a map and vice versa.
-- The structure and the methods that define an anonymised, signable tree.
+- The structure and the methods that define an anonymised tree.
 */
 
-// AnonNode define the structure of an anonymised signable node.
+// AnonNode define the structure of an anonymised node.
 // It is used to anonymise an html.Node from "golang.org/x/net/html" package
 type AnonNode struct {
 	Parent, FirstChild, LastChild, PrevSibling, NextSibling *AnonNode
 
 	HashedData string
-	Signatures map[*network.ServerIdentity]crypto.SchnorrSig
+	Seen       bool
 }
 
 // AppendChild adds a node c as a child of p.
@@ -68,13 +68,6 @@ func (n *AnonNode) RemoveChild(c *AnonNode) error {
 	c.PrevSibling = nil
 	c.NextSibling = nil
 	return nil
-}
-
-func (n *AnonNode) Sign(server *network.ServerIdentity, signature crypto.SchnorrSig) {
-	if n.Signatures == nil {
-		n.Signatures = make(map[*network.ServerIdentity]crypto.SchnorrSig)
-	}
-	n.Signatures[server] = signature
 }
 
 // IsSimilarTo tests if two nodes, usually from different trees, share a
@@ -203,10 +196,9 @@ func commonAncestor(path1 []*AnonNode, path2 []*AnonNode) (int, *AnonNode) {
 // AnonNode as an array that can be send through the network and from which the
 // original tree can be deterministically reconstructed.
 type ExplicitNode struct {
-	Children []int64
-
+	Children   []int64
 	HashedData string
-	Signatures map[*network.ServerIdentity]crypto.SchnorrSig
+	Seen       bool
 }
 
 // nodeToExplicitNode take an AnonNode as input and output an ExplicitNode
@@ -216,7 +208,8 @@ func nodeToExplicitNode(n *AnonNode) ExplicitNode {
 	en := ExplicitNode{
 		Children:   make([]int64, 0),
 		HashedData: n.HashedData,
-		Signatures: n.Signatures}
+		Seen:       n.Seen,
+	}
 	return en
 }
 
@@ -226,7 +219,7 @@ func nodeToExplicitNode(n *AnonNode) ExplicitNode {
 func explicitNodeToNode(en ExplicitNode) AnonNode {
 	n := AnonNode{
 		HashedData: en.HashedData,
-		Signatures: en.Signatures,
+		Seen:       en.Seen,
 	}
 	return n
 }
