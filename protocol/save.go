@@ -62,6 +62,10 @@ type SaveMessage struct {
 
 	MsgToSign  chan []byte
 	StringChan chan string
+
+	RefTreeChan chan []ExplicitNode
+	SeenMapChan chan map[abstract.Point][]byte
+	SeenSigChan chan map[abstract.Point]crypto.SchnorrSig
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -77,6 +81,9 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		SeenSig:          make(map[abstract.Point]crypto.SchnorrSig),
 		MsgToSign:        make(chan []byte),
 		StringChan:       make(chan string),
+		RefTreeChan:      make(chan []ExplicitNode),
+		SeenMapChan:      make(chan map[abstract.Point][]byte),
+		SeenSigChan:      make(chan map[abstract.Point]crypto.SchnorrSig),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -102,7 +109,8 @@ func (p *SaveMessage) Start() error {
 	if sErr != nil {
 		log.Fatal("Error in save protocol Start():", sErr)
 	}
-
+	log.Lvl4("Send Explicit Tree to service")
+	p.RefTreeChan <- explicitTree
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
 		SaveAnnounce{
@@ -317,6 +325,8 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 			} else if p.MasterHash != nil && len(p.MasterHash) > 0 {
 				p.MsgToSign <- p.PlainData[requestedHash]
 			}
+			p.SeenMapChan <- seenmapBoolToByte(p.SeenMap)
+			p.SeenSigChan <- p.SeenSig
 			// announce the end of the process
 			msg := SaveAnnounce{
 				Phase: End,

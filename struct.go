@@ -6,8 +6,12 @@ This holds the messages used to communicate with the service over the network.
 
 import (
 	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
+	"gopkg.in/dedis/crypto.v0/abstract"
 	"gopkg.in/dedis/onet.v1"
+	"gopkg.in/dedis/onet.v1/crypto"
 	"gopkg.in/dedis/onet.v1/network"
+
+	"github.com/nblp/decenarch/protocol"
 )
 
 // We need to register all messages so the network knows how to handle them.
@@ -54,12 +58,12 @@ type RetrieveResponse struct {
 }
 
 // Webstore is used to store website
-// - Url is the address of the page
-// - ContentType is the MIME TYPE
-// - Sig is the collective signature for  base64.StdEncoding.DecodeString(Page)
-// - Page is a base64 string representing a []byte
-// - AddsUrl is the urls of the attached additional ressources
-// - Timestamp is the time at which the page was retrieved format 2006/01/02 15:04
+//    - Url is the address of the page
+//    - ContentType is the MIME TYPE
+//    - Sig is the collective signature for  base64.StdEncoding.DecodeString(Page)
+//    - Page is a base64 string representing a []byte
+//    - AddsUrl is the urls of the attached additional ressources
+//    - Timestamp is the time at which the page was retrieved format 2006/01/02 15:04
 type Webstore struct {
 	Url         string
 	ContentType string
@@ -67,4 +71,20 @@ type Webstore struct {
 	Page        string
 	AddsUrl     []string
 	Timestamp   string
+}
+
+// Webproof is the proof of the consensus code. It prooves that the leader
+// does not add content to the html code produced in Page
+//    - RefTree is the reference tree used to create the page
+//    - SeenMap is all the seen array used in the consensus protocol
+//    - SigMap is all the signature used in the consensus protocol
+type Webproof struct {
+	Url       string
+	Sig       *cosiservice.SignatureResponse
+	Page      string
+	Timestamp string
+
+	RefTree []protocol.ExplicitNode
+	SeenMap map[abstract.Point][]byte
+	SigMap  map[abstract.Point]crypto.SchnorrSig
 }
