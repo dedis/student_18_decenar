@@ -203,19 +203,6 @@ func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*de
 	lastKnowID = lastKnowBlock.Hash
 	// get whole skip chain once
 	allResp, alErr := skipclient.GetUpdateChain(req.Roster, lastKnowBlock.GenesisID)
-	// NOTE this part is here for debug purpose
-	for _, b := range allResp.Update {
-		webs, wErr := webstoreCompleteFromBytes(b.Data)
-		if wErr == nil {
-			log.Lvl3("Block has:")
-			for _, w := range webs {
-				log.Lvl3("'-->", w.Url, ":", w.Timestamp)
-			}
-		} else {
-			log.Lvl3(wErr)
-		}
-	}
-	// NOTE this ends the debug purpose's part
 	if alErr != nil {
 		return nil, alErr
 	}
@@ -236,7 +223,6 @@ func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*de
 		}
 		// check if a mainPage was found
 		if mainPage.Url != "" {
-			// TODO eventually include verification key for skipblock
 			finalResp := decenarch.SkipGetDataResponse{
 				MainPage: mainPage,
 				AllPages: webs,
