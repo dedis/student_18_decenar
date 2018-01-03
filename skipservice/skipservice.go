@@ -6,14 +6,17 @@ runs on the node.
 */
 
 import (
-	"encoding/json"
 	"errors"
 	"sync"
 	"time"
 
+	"encoding/base64"
+	"encoding/json"
+
 	"github.com/nblp/decenarch"
 	skipchain "gopkg.in/dedis/cothority.v1/skipchain"
 
+	"gopkg.in/dedis/crypto.v0/cosi"
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"
@@ -56,7 +59,8 @@ type skipstorage struct {
 	Skipchain       []*skipchain.SkipBlock
 }
 
-// SkipRootStartRequest TODO documentation
+// SkipRootStartRequest create a genesis block and begin a new skipchain
+// it should not be used without SkipStartRequest.
 func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) (*decenarch.SkipRootStartResponse, onet.ClientError) {
 	log.Lvl1("SkipRootStartRequest execution")
 	skipclient := skipchain.NewClient()
@@ -78,7 +82,10 @@ func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) 
 	return &decenarch.SkipRootStartResponse{skipblock}, nil
 }
 
-// SkipStartRequest TODO documentation + probably debug/improve things
+// SkipStartRequest create a go-routine that will listen to the s.dataChan and
+// will create a skipblock every skipMin minutes. No data verification will
+// be done. We assume it is done before when storing the data in s.data in the
+// SkipAddDataRequest function.
 func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decenarch.SkipStartResponse, onet.ClientError) {
 	log.Lvl1("SkipStartRequest execution")
 	skipclient := skipchain.NewClient()
@@ -149,14 +156,29 @@ func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarc
 	return &decenarch.SkipStopResponse{}, nil
 }
 
+// SkipAddDataRequest receive webstore data, verify their integrity and store
+// the valid data inside the service waiting for them to be put on the skipchain
 func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, onet.ClientError) {
 	log.Lvl4("SkipAddDataRequest - Begin")
-	// TODO verify cosi signature before adding data
 	// TODO verify signature by EVERY conodes in the skipchain roster
-	s.data = append(s.data, req.Data...)
 	for _, d := range req.Data {
 		log.Lvl4("SkipAddDataRequest - add", d)
+		// verify signature
+		bd, bdErr := base64.StdEncoding.DecodeString(d.Page)
+		if bdErr != nil {
+			return nil, onet.NewClientError(bdErr)
+		}
+		vsErr := cosi.VerifySignature(
+			network.Suite,
+			req.Roster.Publics(),
+			bd,
+			d.Sig.Signature)
+		if vsErr != nil {
+			return nil, onet.NewClientError(vsErr)
+		}
+		// effectively add data
 		s.dataChan <- d
+		s.data = append(s.data, d)
 	}
 	log.Lvl4("SkipAddDataRequest - done")
 	return &decenarch.SkipAddDataResponse{}, nil

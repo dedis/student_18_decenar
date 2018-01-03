@@ -1,7 +1,5 @@
 package protocol
 
-// TODO control + adapt documentation
-
 import (
 	"errors"
 )

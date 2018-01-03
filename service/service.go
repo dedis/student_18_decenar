@@ -21,8 +21,8 @@ import (
 
 	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
 
+	"gopkg.in/dedis/crypto.v0/cosi"
 	"gopkg.in/dedis/onet.v1"
-	"gopkg.in/dedis/onet.v1/crypto"
 	"gopkg.in/dedis/onet.v1/log"
 	"gopkg.in/dedis/onet.v1/network"
 )
@@ -135,7 +135,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 // RetrieveRequest
 func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, onet.ClientError) {
-	log.Lvl3("Decenarch Service new RetrieveRequest")
+	log.Lvl3("Decenarch Service new RetrieveRequest:", req)
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
 	skipclient := decenarch.NewSkipClient()
@@ -151,22 +151,34 @@ func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.Re
 	if bErr != nil {
 		return nil, onet.NewClientError(bErr)
 	}
-	// TODO verify signature error here 65 bits instead of 64
-	//log.Lvl4("service-RetrieveRequest-verify signature")
-	vsigErr := crypto.VerifySchnorr(
+	log.Lvl4("service-RetrieveRequest-verify signature")
+	vsigErr := cosi.VerifySignature(
 		network.Suite,
-		req.Roster.Aggregate,
+		req.Roster.Publics(),
 		bPage,
 		resp.MainPage.Sig.Signature)
 	if vsigErr != nil {
 		log.Lvl1(vsigErr)
-		//return nil, onet.NewClientError(vsigErr)
+		return nil, onet.NewClientError(vsigErr)
 	}
 	for _, addUrl := range resp.MainPage.AddsUrl {
 		for _, addPage := range resp.AllPages {
 			if addUrl == addPage.Url {
-				// TODO verify cosi signature
-				returnResp.Adds = append(returnResp.Adds, addPage)
+				baPage, baErr := base64.StdEncoding.DecodeString(addPage.Page)
+				if baErr == nil {
+					sErr := cosi.VerifySignature(
+						network.Suite,
+						req.Roster.Publics(),
+						baPage,
+						addPage.Sig.Signature)
+					if sErr == nil {
+						returnResp.Adds = append(returnResp.Adds, addPage)
+					} else {
+						log.Lvl1("A non-fatal error occured:", sErr)
+					}
+				} else {
+					log.Lvl1("A non-fatal error occured:", baErr)
+				}
 			}
 		}
 	}

@@ -42,7 +42,6 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientE
 	resp := &SkipStartResponse{}
 	errs := make([]onet.ClientError, 0)
 	for _, srv := range r.List {
-		// NOTE sleep sometimes necessary to avoid conflicts in creation
 		time.Sleep(2 * time.Second)
 		log.Lvl4("send SkipStartRequest to:", srv)
 		resp = &SkipStartResponse{}
@@ -64,7 +63,6 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientE
 
 // SkipStop stops the infinite skipblocks creations loop on all the conodes.
 func (c *SkipClient) SkipStop(r *onet.Roster) (*SkipStopResponse, onet.ClientError) {
-	// TODO create the skipstop resp/req structure
 	log.Lvl1("SkipStop")
 	resp := &SkipStopResponse{}
 	errs := make([]onet.ClientError, 0)
@@ -85,7 +83,7 @@ func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataR
 	log.Lvl1("SkipAddData")
 	resp := &SkipAddDataResponse{}
 	dst := r.RandomServerIdentity()
-	err := c.SendProtobuf(dst, &SkipAddDataRequest{Data: data}, resp)
+	err := c.SendProtobuf(dst, &SkipAddDataRequest{Roster: r, Data: data}, resp)
 	if err != nil {
 		return nil, err
 	}
