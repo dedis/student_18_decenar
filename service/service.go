@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"errors"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -169,6 +170,10 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "skipAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	skipclient.SkipAddData(req.Roster, webadds)
 	stattimes = append(stattimes, "saveReqEnd;"+time.Now().Format(decenarch.StatTimeFormat))
+	sInt := strconv.Itoa(numNodes)
+	stattimes = append(stattimes, "numbrNodes;"+sInt)
+	sInt = strconv.Itoa(len(proofwebmain.RefTree))
+	stattimes = append(stattimes, "numberHtmlTreeNodes;"+sInt)
 	resp := &decenarch.SaveResponse{Times: stattimes}
 	return resp, nil
 }

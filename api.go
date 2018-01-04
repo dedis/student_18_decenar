@@ -40,7 +40,11 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientErr
 		return nil, err
 	}
 	resp.Times = append(resp.Times, "genend;"+time.Now().Format(StatTimeFormat))
-	log.Lvl1(resp.Times)
+	log.Lvl1("ttime: begin")
+	for _, t := range resp.Times {
+		log.Lvl1("ttime:", t)
+	}
+	log.Lvl1("ttime: end")
 	return resp, nil
 }
 
