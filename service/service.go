@@ -57,14 +57,17 @@ type storage struct {
 // SaveRequest is the function called by the service when a client want to save a website in the
 // archive.
 func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveResponse, onet.ClientError) {
+	stattimes := make([]string, 0)
+	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	log.Lvl3("Decenarch Service new SaveRequest")
-	tree := req.Roster.GenerateNaryTreeWithRoot(2, s.ServerIdentity())
+	numNodes := len(req.Roster.List)
+	tree := req.Roster.GenerateNaryTreeWithRoot(numNodes-1, s.ServerIdentity())
 	if tree == nil {
 		return nil, onet.NewClientErrorCode(decenarch.ErrorParse, "couldn't create tree")
 	}
 
 	// IMPROVEMENT threshold should be easily configurable
-	threshold := int32(math.Ceil(float64(len(tree.Roster.List)) * 0.8))
+	threshold := int32(math.Ceil(float64(numNodes) * 0.8))
 
 	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
@@ -73,6 +76,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	pi.(*protocol.SaveMessage).Url = req.Url
 	// IMPROVEMENT threshold could not be hardcoded
 	pi.(*protocol.SaveMessage).Threshold = threshold
+	stattimes = append(stattimes, "saveProtoStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	go pi.Start()
 	// get result of consensus
 	log.Lvl4("Waiting for protocol data...")
@@ -82,12 +86,14 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	var msgToSign []byte = <-pi.(*protocol.SaveMessage).MsgToSign
 	smc := <-pi.(*protocol.SaveMessage).SeenMapChan
 	ssc := <-pi.(*protocol.SaveMessage).SeenSigChan
+	stattimes = append(stattimes, "saveCosiStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	// sign the consensus website found
 	cosiclient := cosiservice.NewClient()
 	sig, sigErr := cosiclient.SignatureRequest(req.Roster, msgToSign)
 	if sigErr != nil {
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
+	stattimes = append(stattimes, "saveCreaStructStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	mainTimestamp := time.Now().Format("2006/01/02 15:04")
 	webmain := decenarch.Webstore{
 		Url:         realUrl,
@@ -112,6 +118,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
 	var webproofs []decenarch.Webproof = make([]decenarch.Webproof, 0)
 	bytePage, byteErr := base64.StdEncoding.DecodeString(webmain.Page)
+	stattimes = append(stattimes, "sameForAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	addsLinks := make([]string, 0)
 	if byteErr == nil {
 		addsLinks = ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
@@ -159,9 +166,10 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	webproofs = append(webproofs, proofwebmain)
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := decenarch.NewSkipClient()
+	stattimes = append(stattimes, "skipAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	skipclient.SkipAddData(req.Roster, webadds)
-
-	resp := &decenarch.SaveResponse{}
+	stattimes = append(stattimes, "saveReqEnd;"+time.Now().Format(decenarch.StatTimeFormat))
+	resp := &decenarch.SaveResponse{Times: stattimes}
 	return resp, nil
 }
 

@@ -16,6 +16,7 @@ import (
 
 // ServiceName is used for registration on the onet.
 const ServiceName = "Decenarch"
+const StatTimeFormat = "2006/01/02 15:04.0000"
 
 // Client is a structure to communicate with the Decenarch
 // service
@@ -32,11 +33,14 @@ func NewClient() *Client {
 func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientError) {
 	dst := r.RandomServerIdentity()
 	log.Lvl4("Sending message to", dst)
-	resp := &SaveResponse{}
+	resp := &SaveResponse{Times: make([]string, 0)}
+	resp.Times = append(resp.Times, "genstart;"+time.Now().Format(StatTimeFormat))
 	err := c.SendProtobuf(dst, &SaveRequest{url, r}, resp)
 	if err != nil {
 		return nil, err
 	}
+	resp.Times = append(resp.Times, "genend;"+time.Now().Format(StatTimeFormat))
+	log.Lvl1(resp.Times)
 	return resp, nil
 }
 

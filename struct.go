@@ -39,7 +39,9 @@ type SaveRequest struct {
 }
 
 // SaveResponse return an error if the website could not be saved correctly
+//     - Times  collect statistic times in form key;decenarch.StatTimeFormat
 type SaveResponse struct {
+	Times []string
 }
 
 // RetrieveRequest will retreive the website from the conode using the protocol
