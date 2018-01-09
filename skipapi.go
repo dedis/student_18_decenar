@@ -96,8 +96,10 @@ func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataR
 // be given with scheme.
 func (c *SkipClient) SkipGetData(r *onet.Roster, url string, time string) (*SkipGetDataResponse, onet.ClientError) {
 	log.Lvl1("SkipGetData")
+	log.Lvl4("API call")
 	resp := &SkipGetDataResponse{}
 	dst := r.RandomServerIdentity()
+	log.Lvl4("Send GetDataRequest to service")
 	err := c.SendProtobuf(
 		dst,
 		&SkipGetDataRequest{

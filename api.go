@@ -11,12 +11,14 @@ This part of the service runs on the client or the app.
 import (
 	"gopkg.in/dedis/onet.v1"
 	"gopkg.in/dedis/onet.v1/log"
+	"strconv"
+	"strings"
 	"time"
 )
 
 // ServiceName is used for registration on the onet.
 const ServiceName = "Decenarch"
-const StatTimeFormat = "2006/01/02 15:04.0000"
+const StatTimeFormat = "2006/01/02 15:04:05.0000"
 
 // Client is a structure to communicate with the Decenarch
 // service
@@ -41,9 +43,44 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientErr
 	}
 	resp.Times = append(resp.Times, "genend;"+time.Now().Format(StatTimeFormat))
 	log.Lvl1("ttime: begin")
+	csvMap := make(map[string]string)
 	for _, t := range resp.Times {
-		log.Lvl1("ttime:", t)
+		tabl := strings.Split(t, ";")
+		log.Lvl1("ttime:", tabl)
+		csvMap[tabl[0]] = tabl[1]
 	}
+	log.Lvl1(csvMap)
+	csvLine := "web,numConodes,numHtmlNodes,start,reqS,cosi,adds,skip\n"
+	// web, numConodes
+	csvLine += url + "," + csvMap["numbrNodes"] + ","
+	// numHtmlNodes
+	csvLine += csvMap["numberHtmlTreeNodes"] + ","
+	// start (always == 0)
+	t1, _ := time.Parse(StatTimeFormat, csvMap["genstart"])
+	t2, _ := time.Parse(StatTimeFormat, csvMap["genstart"])
+	d := t1.Sub(t2)
+	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
+	// reqS
+	t1, _ = time.Parse(StatTimeFormat, csvMap["saveCosiStart"])
+	t2, _ = time.Parse(StatTimeFormat, csvMap["genstart"])
+	d = t1.Sub(t2)
+	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
+	// cosi
+	t1, _ = time.Parse(StatTimeFormat, csvMap["sameForAddStart"])
+	t2, _ = time.Parse(StatTimeFormat, csvMap["saveCosiStart"])
+	d = t1.Sub(t2)
+	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
+	// adds
+	t1, _ = time.Parse(StatTimeFormat, csvMap["skipAddStart"])
+	t2, _ = time.Parse(StatTimeFormat, csvMap["sameForAddStart"])
+	d = t1.Sub(t2)
+	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
+	// skip
+	t1, _ = time.Parse(StatTimeFormat, csvMap["genend"])
+	t2, _ = time.Parse(StatTimeFormat, csvMap["skipAddStart"])
+	d = t1.Sub(t2)
+	csvLine += strconv.Itoa(int(d.Nanoseconds()))
+	log.Lvl1(csvLine)
 	log.Lvl1("ttime: end")
 	return resp, nil
 }

@@ -137,7 +137,7 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 				log.Lvl4("Waiting for data...")
 				select {
 				case d := <-s.dataChan:
-					log.Lvl4("skipstart - data added!")
+					log.Lvl4("skipstart - data added:", d.Url, "!")
 					s.data = append(s.data, d)
 				case <-time.After(skipMin * time.Minute):
 					log.Lvl4("skipstart - data timeout!")
@@ -161,6 +161,7 @@ func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarc
 func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, onet.ClientError) {
 	log.Lvl4("SkipAddDataRequest - Begin")
 	// TODO verify signature by EVERY conodes in the skipchain roster
+	s.data = make([]decenarch.Webstore, 0)
 	for _, d := range req.Data {
 		log.Lvl4("SkipAddDataRequest - add", d)
 		// verify signature
@@ -185,6 +186,7 @@ func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*de
 }
 
 func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*decenarch.SkipGetDataResponse, onet.ClientError) {
+	log.Lvl4("Begin GetData request on service")
 	s.skipstorage.Lock()
 	lastKnowID := s.skipstorage.LastSkipBlockID
 	s.skipstorage.Unlock()
@@ -207,9 +209,11 @@ func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*de
 		return nil, alErr
 	}
 	for _, block := range allResp.Update {
+		log.Lvl4("Test with block:", block)
 		// test if data contains the correct (url,timestamp) couple
 		var mainPage decenarch.Webstore
 		webs, wErr := webstoreCompleteFromBytes(block.Data)
+		log.Lvl4("WE HAVE", webs)
 		if wErr == nil {
 			for _, webpage := range webs {
 				tBlock, tbErr := time.Parse("2006/01/02 15:04", webpage.Timestamp)
