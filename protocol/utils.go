@@ -92,10 +92,10 @@ func (n *AnonNode) IsSimilarTo(that *AnonNode) bool {
 	sameData := n.HashedData == that.HashedData
 
 	height := 0
-	for c := n; c != nil; c = n.Parent {
+	for c := n; c != nil; c = c.Parent {
 		height += 1
 	}
-	for c := that; c != nil; c = that.Parent {
+	for c := that; c != nil; c = c.Parent {
 		height -= 1
 	}
 	sameHeight := height == 0
@@ -174,7 +174,7 @@ func (root *AnonNode) ListPaths() [][]*AnonNode {
 // It outputs the common ancestor of those paths as well as the height of that
 // ancestor.
 //     Example:
-//        R       X   · commonAncestor(   A-R, D-B-R ) =  0, E
+//        R       X   · commonAncestor(   A-R, D-B-R ) =  0, R
 //       / \      |   · commonAncestor( C-B-R, D-B-R ) =  1, B
 //      A   B     Y   · commonAncestor( C-B-R, Z-Y-X ) = -1, nil
 //         / \    |

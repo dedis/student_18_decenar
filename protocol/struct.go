@@ -83,8 +83,8 @@ type SaveReply struct {
 	MasterTreeSig crypto.SchnorrSig
 	MasterHash    map[string]map[abstract.Point]crypto.SchnorrSig
 
-	SeenMap map[abstract.Point][]byte
-	SigMap  map[abstract.Point]crypto.SchnorrSig
+	SeenMap map[string][]byte
+	SigMap  map[string]crypto.SchnorrSig
 
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte

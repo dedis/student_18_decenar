@@ -50,7 +50,7 @@ type SkipService struct {
 const skipstorageID = "main"
 
 // skipMin is the number of minutes between each block creation
-// TODO put back to 10
+// TODO original value 10
 const skipMin = 2
 
 type skipstorage struct {
@@ -160,7 +160,6 @@ func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarc
 // the valid data inside the service waiting for them to be put on the skipchain
 func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, onet.ClientError) {
 	log.Lvl4("SkipAddDataRequest - Begin")
-	// TODO verify signature by EVERY conodes in the skipchain roster
 	s.data = make([]decenarch.Webstore, 0)
 	for _, d := range req.Data {
 		log.Lvl4("SkipAddDataRequest - add", d)

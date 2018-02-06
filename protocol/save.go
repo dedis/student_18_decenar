@@ -52,8 +52,8 @@ type SaveMessage struct {
 	MasterTreeSig crypto.SchnorrSig
 	LocSeen       []bool
 	LocSig        crypto.SchnorrSig
-	SeenMap       map[abstract.Point][]bool
-	SeenSig       map[abstract.Point]crypto.SchnorrSig
+	SeenMap       map[string][]bool
+	SeenSig       map[string]crypto.SchnorrSig
 
 	MasterHash map[string]map[abstract.Point]crypto.SchnorrSig
 
@@ -64,8 +64,8 @@ type SaveMessage struct {
 	StringChan chan string
 
 	RefTreeChan chan []ExplicitNode
-	SeenMapChan chan map[abstract.Point][]byte
-	SeenSigChan chan map[abstract.Point]crypto.SchnorrSig
+	SeenMapChan chan map[string][]byte
+	SeenSigChan chan map[string]crypto.SchnorrSig
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -77,13 +77,13 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		Phase:            NilPhase,
 		PlainNodes:       make(map[string]html.Node),
 		PlainData:        make(map[string][]byte),
-		SeenMap:          make(map[abstract.Point][]bool),
-		SeenSig:          make(map[abstract.Point]crypto.SchnorrSig),
+		SeenMap:          make(map[string][]bool),
+		SeenSig:          make(map[string]crypto.SchnorrSig),
 		MsgToSign:        make(chan []byte),
 		StringChan:       make(chan string),
 		RefTreeChan:      make(chan []ExplicitNode),
-		SeenMapChan:      make(chan map[abstract.Point][]byte),
-		SeenSigChan:      make(chan map[abstract.Point]crypto.SchnorrSig),
+		SeenMapChan:      make(chan map[string][]byte),
+		SeenSigChan:      make(chan map[string]crypto.SchnorrSig),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -99,7 +99,8 @@ func (p *SaveMessage) Start() error {
 	p.Phase = Consensus
 	masterTree, masterHash, err := p.GetLocalData()
 	if err != nil {
-		log.Fatal("Error in save protocol Start():", err)
+		log.Error("Error in save protocol Start():", err)
+		return err
 	}
 	p.MasterTree = masterTree
 	p.MasterHash = masterHash
@@ -125,7 +126,8 @@ func (p *SaveMessage) Start() error {
 // HandleAnnounce is the first message and is used to send an ID that
 // is stored in all nodes.
 //
-// Note: this function must be read by-case. Each can be considered as an
+// Note: this function must be read as multiple functions with a common begining
+// and end but each time a different 'case'. Each one can be considered as an
 // independant function.
 func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 	log.Lvl4("Handling", p)
@@ -224,10 +226,11 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 // HandleReply is the message going up the tree and holding a counter
 // to verify the number of nodes.
 //
-// Note: this function must be read by-case. Each can be considered as an
+// Note: this function must be read as multiple functions with a common begining
+// and end but each time a different 'case'. Each one can be considered as an
 // independant function.
 func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
-	log.Lvl3("Handling Save Reply", p)
+	log.Lvl4("Handling Save Reply", p)
 	log.Lvl4("And the replies", reply)
 	switch p.Phase {
 	case NilPhase:
@@ -250,11 +253,11 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 			if p.MasterTree != nil {
 				validSeen, _, valErr := getValidOnlySeenSig(p)
 				if valErr != nil {
-					return valErr
+					p.Errs = append(p.Errs, valErr)
 				}
 				consRoot, consErr := createConsensusTree(p, validSeen)
 				if consErr != nil {
-					return consErr
+					p.Errs = append(p.Errs, consErr)
 				}
 				consensusRoot = consRoot
 			}
@@ -586,7 +589,6 @@ func GetExplicitSeenHash(en []ExplicitNode, seen []bool) ([]byte, error) {
 // master tree defined by its root masterRoot. It adds the signature of the
 // conode server on all the nodes of the master tree that can be associated
 // with a node of the slave tree.
-// See the high-level documentation (/doc/) for further details.
 func setLocalSeenAndSign(p *SaveMessage, slaveRoot *AnonNode, masterRoot *AnonNode) error {
 	// compare salveTree and masterTree and mark the master
 	unseenWholeTree(masterRoot)
@@ -611,21 +613,28 @@ func setLocalSeenAndSign(p *SaveMessage, slaveRoot *AnonNode, masterRoot *AnonNo
 						return errors.New("Two paths on same tree do not share a root")
 					}
 					similarCommonAncestor = (sH == mH) && sCA.IsSimilarTo(mCA)
+					similarCommonAncestor = (sH == mH) &&
+						(sCA.HashedData == mCA.HashedData)
+
 				}
 				if sameLength && similarCommonAncestor {
+					var simNodes bool = true
 					for k := 0; k < len(slavep); k++ {
-						if !slavep[k].IsSimilarTo(masterp[k]) {
+						simTest := masterp[k].HashedData == slavep[k].HashedData
+						if !simTest {
+							simNodes = false
 							break
 						}
-						if k == len(slavep)-1 {
-							// we mark all the nodes of masterPaths[j] as seen
-							for nIdx := 0; nIdx < len(masterp); nIdx++ {
-								masterp[nIdx].Seen = true
-							}
-							mostLeftMasterSignedPathIdx = j
-							mostLeftSlaveSignedPathIdx = i
-						}
 					}
+					if simNodes {
+						// we mark all the nodes of masterPaths[j] as seen
+						for nIdx := 0; nIdx < len(masterp); nIdx++ {
+							masterp[nIdx].Seen = true
+						}
+						mostLeftMasterSignedPathIdx = j
+						mostLeftSlaveSignedPathIdx = i
+					}
+					// if we found a match, skip the left master paths
 					if mostLeftMasterSignedPathIdx == j {
 						break
 					}
@@ -699,8 +708,8 @@ func (p *SaveMessage) AggregateStructData(locTree *AnonNode, reply []StructSaveR
 			}
 		}
 		// add local result to aggregated result
-		p.SeenMap[p.Public()] = p.LocSeen
-		p.SeenSig[p.Public()] = p.LocSig
+		p.SeenMap[p.Public().String()] = p.LocSeen
+		p.SeenSig[p.Public().String()] = p.LocSig
 	}
 }
 
@@ -775,8 +784,8 @@ func getValidOnlySeenSig(p *SaveMessage) (map[abstract.Point][]bool, map[abstrac
 	validSeen := make(map[abstract.Point][]bool)
 	validSig := make(map[abstract.Point]crypto.SchnorrSig)
 	for _, kp := range (p.Roster()).Publics() {
-		if seen, ok := p.SeenMap[kp]; ok {
-			if sig, sok := p.SeenSig[kp]; sok {
+		if seen, ok := p.SeenMap[kp.String()]; ok {
+			if sig, sok := p.SeenSig[kp.String()]; sok {
 				slaveHash, shErr := GetExplicitSeenHash(masterExplicit, seen)
 				if shErr == nil {
 					vsErr := crypto.VerifySchnorr(
@@ -825,26 +834,25 @@ func createConsensusTree(p *SaveMessage, validSeen map[abstract.Point][]bool) (*
 			}
 		}
 	}
-	for idx, eNode := range explicitMaster {
-		if int(aggregateSeen[idx]) > int(p.Threshold) {
-			eNode.Seen = true
+	for idx := 0; idx < len(explicitMaster); idx++ {
+		if int(aggregateSeen[idx]) >= int(p.Threshold) {
+			explicitMaster[idx].Seen = true
+		} else {
+			explicitMaster[idx].Seen = false
 		}
 	}
 	root := convertToAnonTree(explicitMaster)
-	var errs []error
-	leaves := root.ListLeaves()
-	for _, leaf := range leaves {
-		if !leaf.Seen {
-			var parent *AnonNode = leaf.Parent
-			var child *AnonNode = leaf
-			for ; parent != nil && parent.FirstChild == nil; parent = parent.Parent {
-				errs = append(errs, parent.RemoveChild(child))
-				child = parent
+	for setChanged := true; setChanged; {
+		leaves := root.ListLeaves()
+		setChanged = false
+		for _, leaf := range leaves {
+			if !leaf.Seen {
+				setChanged = true
+				var parent *AnonNode = leaf.Parent
+				var child *AnonNode = leaf
+				parent.RemoveChild(child)
 			}
 		}
-	}
-	if len(errs) > 0 {
-		return nil, errors.New("Some below threshold children were not removed")
 	}
 
 	return root, nil
@@ -965,8 +973,11 @@ func explicitToHtmlNode(plainNodes map[string]html.Node, en ExplicitNode) html.N
 	return node
 }
 
-func seenmapBoolToByte(boolseen map[abstract.Point][]bool) map[abstract.Point][]byte {
-	bySeen := make(map[abstract.Point][]byte)
+// seenmapBoolToByte turns the p.SeenMap that contains the html nodes seen by the
+// conode as a boolean list into a byte list where true~byte(1), false~byte(0)
+// to make it network friendly.
+func seenmapBoolToByte(boolseen map[string][]bool) map[string][]byte {
+	bySeen := make(map[string][]byte)
 	for key, bs := range boolseen {
 		bySeen[key] = make([]byte, len(bs))
 		for idx, b := range bs {
@@ -980,8 +991,11 @@ func seenmapBoolToByte(boolseen map[abstract.Point][]bool) map[abstract.Point][]
 	return bySeen
 }
 
-func seenmapByteToBool(byteseen map[abstract.Point][]byte) map[abstract.Point][]bool {
-	boSeen := make(map[abstract.Point][]bool)
+// seenmapByteToBool turns the network received SeenMap of a distant conode into
+// a boolean list to make it compatible with the locally computed p.SeenMap used to
+// define which html nodes had been seen by the local conode.
+func seenmapByteToBool(byteseen map[string][]byte) map[string][]bool {
+	boSeen := make(map[string][]bool)
 	for key, bs := range byteseen {
 		boSeen[key] = make([]bool, len(bs))
 		for idx, b := range bs {

@@ -75,7 +75,6 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		return nil, onet.NewClientErrorCode(4042, err.Error())
 	}
 	pi.(*protocol.SaveMessage).Url = req.Url
-	// IMPROVEMENT threshold could not be hardcoded
 	pi.(*protocol.SaveMessage).Threshold = threshold
 	stattimes = append(stattimes, "saveProtoStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	go pi.Start()

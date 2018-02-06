@@ -164,6 +164,10 @@ func readGroup(c *cli.Context) *app.Group {
 	return group
 }
 
+// storeWebPageOnDisk store the data bData on the filesystem under the path:
+// $cachePath/<path infer from url>.
+// Example: url==http://my.example.ext/folder/file.fext will be stored in
+// $cachePath/ext/example/my/folder/file.fext and file.fext will contains bData
 func storeWebPageOnDisk(mUrl string, bData []byte) (string, error) {
 	pUrl, puErr := urlpkg.Parse(mUrl)
 	if puErr != nil {

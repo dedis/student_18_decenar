@@ -1,3 +1,7 @@
+---
+# This documentation is not updated. Please read the related Master Thesis report
+---
+
 # Decenarch - Decentralized webarchive
 ---
 This client provides two functionality _[saving a webpage](#sav)_ and _[retrieving a website](#ret)_. Allowing respectively to ask the conodes to store the _biggest common subset of a website_ on a skipchain and ask the conodes to retrieve from the skipchain what was store for a certain website at a given time.

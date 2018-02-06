@@ -1,5 +1,9 @@
-This repository is a clone of the DEDIS [cothority template](https://github.com/dedis/cothority_template).
-It is highly experimental and should not be used unil further notice.
+This repository contains the implementation of the Decentralized Internet Archive
+realized in the context of a Master Thesis at the DEDIS laboratory at EPFL.
+
+This repository is based on the DEDIS [cothority template](https://github.com/dedis/cothority_template).
+It is highly experimental and still a prototype and should not be considered
+secure or reliable for real-world purposes.
 
 # Template for a new cothority protocol/service/app
 
@@ -12,30 +16,12 @@ addition:
 * service - create a long-term service that can spawn any number of protocols
 * app - write an app that will interact with, or spawn, a cothority
 
-This repo is geared towards PhD-students who want to add a new functionality to
-the cothority by creating their own protocols, services and apps.
-
-## Starting
-
-You can go-get the repo, then start your project on a new branch. This allows
-you to follow the main cothority-template in case something needs to be
-updated. We suppose you already forked the cothority-template repo into your
-account at `yourlogin`.
-
-```bash
-go get -u github.com/dedis/cothority_template
-cd $GOPATH/src/github.com/dedis/cothority_template
-git remote add perso git@github.com/yourlogin/template
-git checkout -b my_new_project
-git push -u perso my_new_project
-```
-
-Now you can do all your development in `$GOPATH/src/github.com/dedis/cothority_template`
-until you are proficient enough to move it either to the main-repository at
-`dedis/cothority` or adjusting the paths and publish it under your own repo.
-
 ## Documentation
 
+This project is related to an EPFL Master Thesis report which can be used as
+a documentation. Plancherel Nicolas, Decentralized Internet Archive, EPFL 2018.
+
+Furthermore, it is based on the Cothority Template.
 You find more documentation on how to use the template on the wiki:
 [Cothority Template](https://github.com/dedis/cothority_template/wiki)
 
