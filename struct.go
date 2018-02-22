@@ -10,7 +10,7 @@ import (
 	"gopkg.in/dedis/onet.v1/crypto"
 	"gopkg.in/dedis/onet.v1/network"
 
-	"github.com/nblp/decenarch/protocol"
+	"github.com/dedis/student_17_decenar/protocol"
 )
 
 // We need to register all messages so the network knows how to handle them.

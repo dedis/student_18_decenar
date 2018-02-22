@@ -8,7 +8,7 @@ import (
 	"encoding/base64"
 	urlpkg "net/url"
 
-	decenarch "github.com/nblp/decenarch"
+	decenarch "github.com/dedis/student_17_decenar"
 
 	"gopkg.in/dedis/onet.v1/app"
 

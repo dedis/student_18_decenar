@@ -13,7 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/nblp/decenarch"
+	"github.com/dedis/student_17_decenar"
 	skipchain "gopkg.in/dedis/cothority.v1/skipchain"
 
 	"gopkg.in/dedis/crypto.v0/cosi"

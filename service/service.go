@@ -16,8 +16,8 @@ import (
 	"encoding/base64"
 	urlpkg "net/url"
 
-	"github.com/nblp/decenarch"
-	"github.com/nblp/decenarch/protocol"
+	"github.com/dedis/student_17_decenar"
+	"github.com/dedis/student_17_decenar/protocol"
 	"golang.org/x/net/html"
 
 	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
