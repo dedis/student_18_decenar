@@ -11,8 +11,9 @@ This part of the service runs on the client or the app.
 import (
 	"time"
 
-	"gopkg.in/dedis/onet.v1"
-	"gopkg.in/dedis/onet.v1/log"
+	"github.com/dedis/kyber/suites"
+	"github.com/dedis/onet"
+	"github.com/dedis/onet/log"
 )
 
 // ServiceName is used for registration on the onet.
@@ -25,12 +26,12 @@ type SkipClient struct {
 }
 
 // NewClient instantiates a new decenarch.Client
-func NewSkipClient() *SkipClient {
-	return &SkipClient{Client: onet.NewClient(SkipServiceName)}
+func NewSkipClient(suite string) *SkipClient {
+	return &SkipClient{Client: onet.NewClient(suites.MustFind(suite), SkipServiceName)}
 }
 
 // SkipStart starts the infinite skipblocks creations loop on all the conodes.
-func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientError) {
+func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, error) {
 	log.Lvl1("SkipStart")
 	dstRoot := r.RandomServerIdentity()
 	rootResp := &SkipRootStartResponse{}
@@ -40,7 +41,7 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientE
 	}
 	log.Lvl1("rootResp:", rootResp, "and error:", err)
 	resp := &SkipStartResponse{}
-	errs := make([]onet.ClientError, 0)
+	errs := make([]error, 0)
 	for _, srv := range r.List {
 		time.Sleep(2 * time.Second)
 		log.Lvl4("send SkipStartRequest to:", srv)
@@ -62,10 +63,10 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, onet.ClientE
 }
 
 // SkipStop stops the infinite skipblocks creations loop on all the conodes.
-func (c *SkipClient) SkipStop(r *onet.Roster) (*SkipStopResponse, onet.ClientError) {
+func (c *SkipClient) SkipStop(r *onet.Roster) (*SkipStopResponse, error) {
 	log.Lvl1("SkipStop")
 	resp := &SkipStopResponse{}
-	errs := make([]onet.ClientError, 0)
+	errs := make([]error, 0)
 	for _, srv := range r.List {
 		err := c.SendProtobuf(srv, &SkipStopRequest{}, resp)
 		if err != nil {
@@ -79,7 +80,7 @@ func (c *SkipClient) SkipStop(r *onet.Roster) (*SkipStopResponse, onet.ClientErr
 }
 
 // SkipAddData allows to add data to the next block that will be created by the conode.
-func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataResponse, onet.ClientError) {
+func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataResponse, error) {
 	log.Lvl1("SkipAddData")
 	resp := &SkipAddDataResponse{}
 	dst := r.RandomServerIdentity()
@@ -94,7 +95,7 @@ func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataR
 // SkipGetData allow to get the data related to the url at the time given that
 // were stored on the skipchain. Time format is "2006/01/02 15:04". url must
 // be given with scheme.
-func (c *SkipClient) SkipGetData(r *onet.Roster, url string, time string) (*SkipGetDataResponse, onet.ClientError) {
+func (c *SkipClient) SkipGetData(r *onet.Roster, url string, time string) (*SkipGetDataResponse, error) {
 	log.Lvl1("SkipGetData")
 	log.Lvl4("API call")
 	resp := &SkipGetDataResponse{}

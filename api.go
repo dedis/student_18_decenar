@@ -9,11 +9,13 @@ This part of the service runs on the client or the app.
 */
 
 import (
-	"gopkg.in/dedis/onet.v1"
-	"gopkg.in/dedis/onet.v1/log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dedis/kyber/suites"
+	"github.com/dedis/onet"
+	"github.com/dedis/onet/log"
 )
 
 // ServiceName is used for registration on the onet.
@@ -27,12 +29,12 @@ type Client struct {
 }
 
 // NewClient instantiates a new decenarch.Client
-func NewClient() *Client {
-	return &Client{Client: onet.NewClient(ServiceName)}
+func NewClient(suite string) *Client {
+	return &Client{Client: onet.NewClient(suites.MustFind(suite), ServiceName)}
 }
 
 // Save will record the website requested in the conodes
-func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientError) {
+func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, error) {
 	dst := r.RandomServerIdentity()
 	log.Lvl4("Sending message to", dst)
 	resp := &SaveResponse{Times: make([]string, 0)}
@@ -86,7 +88,7 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, onet.ClientErr
 }
 
 // Retrieve will send the website requested to the client
-func (c *Client) Retrieve(r *onet.Roster, url string, timestamp string) (*RetrieveResponse, onet.ClientError) {
+func (c *Client) Retrieve(r *onet.Roster, url string, timestamp string) (*RetrieveResponse, error) {
 	// if no timestamp is given, take 'now as timestamp'
 	if timestamp == "" {
 		t := time.Now()

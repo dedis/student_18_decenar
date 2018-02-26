@@ -5,10 +5,9 @@ This holds the messages used to communicate with the service over the network.
 */
 
 import (
+	"github.com/dedis/onet"
+	"github.com/dedis/onet/network"
 	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
-	"gopkg.in/dedis/onet.v1"
-	"gopkg.in/dedis/onet.v1/crypto"
-	"gopkg.in/dedis/onet.v1/network"
 
 	"github.com/dedis/student_17_decenar/protocol"
 )
@@ -87,5 +86,5 @@ type Webproof struct {
 
 	RefTree []protocol.ExplicitNode
 	SeenMap map[string][]byte
-	SigMap  map[string]crypto.SchnorrSig
+	SigMap  map[string][]byte
 }

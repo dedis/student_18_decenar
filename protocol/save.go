@@ -24,11 +24,12 @@ import (
 	urlpkg "net/url"
 
 	"gopkg.in/dedis/crypto.v0/abstract"
+	"gopkg.in/dedis/kyber.v1"
 
-	"gopkg.in/dedis/onet.v1"
-	"gopkg.in/dedis/onet.v1/crypto"
-	"gopkg.in/dedis/onet.v1/log"
-	"gopkg.in/dedis/onet.v1/network"
+	"github.com/dedis/onet"
+	"github.com/dedis/onet/crypto"
+	"github.com/dedis/onet/log"
+	"github.com/dedis/onet/network"
 )
 
 func init() {
@@ -49,13 +50,13 @@ type SaveMessage struct {
 	Threshold   int32
 
 	MasterTree    *AnonNode
-	MasterTreeSig crypto.SchnorrSig
+	MasterTreeSig []byte
 	LocSeen       []bool
-	LocSig        crypto.SchnorrSig
+	LocSig        []byte
 	SeenMap       map[string][]bool
-	SeenSig       map[string]crypto.SchnorrSig
+	SeenSig       map[string][]byte
 
-	MasterHash map[string]map[abstract.Point]crypto.SchnorrSig
+	MasterHash map[string]map[kyber.Point][]byte
 
 	PlainNodes map[string]html.Node
 	PlainData  map[string][]byte
@@ -65,7 +66,7 @@ type SaveMessage struct {
 
 	RefTreeChan chan []ExplicitNode
 	SeenMapChan chan map[string][]byte
-	SeenSigChan chan map[string]crypto.SchnorrSig
+	SeenSigChan chan map[string][]byte
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -78,12 +79,12 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		PlainNodes:       make(map[string]html.Node),
 		PlainData:        make(map[string][]byte),
 		SeenMap:          make(map[string][]bool),
-		SeenSig:          make(map[string]crypto.SchnorrSig),
+		SeenSig:          make(map[string][]byte),
 		MsgToSign:        make(chan []byte),
 		StringChan:       make(chan string),
 		RefTreeChan:      make(chan []ExplicitNode),
 		SeenMapChan:      make(chan map[string][]byte),
-		SeenSigChan:      make(chan map[string]crypto.SchnorrSig),
+		SeenSigChan:      make(chan map[string][]byte),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -380,7 +381,7 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 // or a signed hash.
 // If the returned *AnonNode tree is not nil, then the map is. Else, it is the other way around.
 // If both returned value are nil, then an error occured.
-func (p *SaveMessage) GetLocalData() (*AnonNode, map[string]map[abstract.Point]crypto.SchnorrSig, error) {
+func (p *SaveMessage) GetLocalData() (*AnonNode, map[string]map[kyber.Point][]byte, error) {
 	// get data
 	resp, realUrl, _, err := getRemoteData(p.Url)
 	if err != nil {
@@ -420,8 +421,8 @@ func (p *SaveMessage) GetLocalData() (*AnonNode, map[string]map[abstract.Point]c
 			log.Lvl1("Error: Impossible to sign data!")
 			return nil, nil, sigErr
 		}
-		localHash := make(map[string]map[abstract.Point]crypto.SchnorrSig)
-		localHash[locHashKey] = make(map[abstract.Point]crypto.SchnorrSig)
+		localHash := make(map[string]map[kyber.Point][]byte)
+		localHash[locHashKey] = make(map[kyber.Point][]byte)
 		localHash[locHashKey][p.Public()] = sig
 		// save plaintext data locally
 		p.PlainData[locHashKey] = rawData
@@ -541,7 +542,7 @@ func getSeenFromExplicitTree(et []ExplicitNode) []bool {
 // partial tree seen by the conode. The masterTree is the reference tree.
 // It also involves p.LocSeen as seen. It is an array where seen[i] = true iff
 // masterTree[i] has been seen locally by the conode.
-func createLocalSig(p *SaveMessage, masterTree []ExplicitNode) (crypto.SchnorrSig, error) {
+func createLocalSig(p *SaveMessage, masterTree []ExplicitNode) ([]byte, error) {
 	seen := p.LocSeen
 	if len(masterTree) != len(seen) {
 		return nil, errors.New("createLocalSig - not all nodes were tagged")
@@ -716,7 +717,7 @@ func (p *SaveMessage) AggregateStructData(locTree *AnonNode, reply []StructSaveR
 // AggregateUnstructData take locHash, the hash of the data signed by the current
 // node and reply the replies of the node's children. It verifies and signs the
 // p.MasterHash with the signatures of both the nodes and its chidren.
-func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[abstract.Point]crypto.SchnorrSig, reply []StructSaveReply) {
+func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[kyber.Point][]byte, reply []StructSaveReply) {
 	if p.MasterHash != nil && len(p.MasterHash) > 0 {
 		for img, sigmap := range locHash {
 			for srv, sig := range sigmap {
@@ -728,7 +729,7 @@ func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[abstract.Poin
 				if vErr == nil {
 					if _, ok := p.MasterHash[img]; !ok {
 						p.MasterHash[img] =
-							make(map[abstract.Point]crypto.SchnorrSig)
+							make(map[kyber.Point][]byte)
 					}
 					p.MasterHash[img][p.Public()] = sig
 				}
@@ -745,7 +746,7 @@ func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[abstract.Poin
 					if vErr == nil {
 						if _, ok := p.MasterHash[img]; !ok {
 							p.MasterHash[img] =
-								make(map[abstract.Point]crypto.SchnorrSig)
+								make(map[kyber.Point][]byte)
 						}
 						p.MasterHash[img][srv] = sig
 					}
@@ -761,7 +762,7 @@ func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[abstract.Poin
 //     - the couple (seen,signature) for each of p.SeenMap, p.SennSig
 // and return a seen map and a signature map that contains only valid signatures
 // also, an error is returned if the signature of the masterTree is invalid.
-func getValidOnlySeenSig(p *SaveMessage) (map[abstract.Point][]bool, map[abstract.Point]crypto.SchnorrSig, error) {
+func getValidOnlySeenSig(p *SaveMessage) (map[kyber.Point][]bool, map[kyber.Point][]byte, error) {
 	// verify mastertree signature
 	masterExplicit := convertToExplicitTree(p.MasterTree)
 	allSeen := make([]bool, len(masterExplicit))
@@ -781,8 +782,8 @@ func getValidOnlySeenSig(p *SaveMessage) (map[abstract.Point][]bool, map[abstrac
 		return nil, nil, vMErr
 	}
 	// verify only signature related to the roster
-	validSeen := make(map[abstract.Point][]bool)
-	validSig := make(map[abstract.Point]crypto.SchnorrSig)
+	validSeen := make(map[kyber.Point][]bool)
+	validSig := make(map[kyber.Point][]byte)
 	for _, kp := range (p.Roster()).Publics() {
 		if seen, ok := p.SeenMap[kp.String()]; ok {
 			if sig, sok := p.SeenSig[kp.String()]; sok {
@@ -823,7 +824,7 @@ func getValidOnlySeenSig(p *SaveMessage) (map[abstract.Point][]bool, map[abstrac
 //
 // Note : This function is highly linked with the setLocalSeenAndSign function
 // a change in the latter probably means a change in this one.
-func createConsensusTree(p *SaveMessage, validSeen map[abstract.Point][]bool) (*AnonNode, error) {
+func createConsensusTree(p *SaveMessage, validSeen map[kyber.Point][]bool) (*AnonNode, error) {
 	unseenWholeTree(p.MasterTree)
 	explicitMaster := convertToExplicitTree(p.MasterTree)
 	aggregateSeen := make([]int, len(explicitMaster))
@@ -865,7 +866,7 @@ func createConsensusTree(p *SaveMessage, validSeen map[abstract.Point][]bool) (*
 //
 // Warning: the signatures verification must be done BEFORE using this function.
 // No signatures verification are done here.
-func getMostSignedHash(p *SaveMessage, hashmap map[string]map[abstract.Point]crypto.SchnorrSig) (map[string]map[abstract.Point]crypto.SchnorrSig, error) {
+func getMostSignedHash(p *SaveMessage, hashmap map[string]map[kyber.Point][]byte) (map[string]map[kyber.Point][]byte, error) {
 	if hashmap == nil {
 		return nil, nil
 	}
@@ -883,7 +884,7 @@ func getMostSignedHash(p *SaveMessage, hashmap map[string]map[abstract.Point]cry
 	if len(hashmap[maxImgH]) < int(p.Threshold) {
 		return nil, errors.New("No sufficient consensus for data")
 	}
-	maxMap := make(map[string]map[abstract.Point]crypto.SchnorrSig)
+	maxMap := make(map[string]map[kyber.Point][]byte)
 	maxMap[maxImgH] = hashmap[maxImgH]
 	return maxMap, nil
 }

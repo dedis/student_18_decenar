@@ -10,8 +10,8 @@ so that it can find out who sent the message.
 import (
 	"golang.org/x/net/html"
 
-	"gopkg.in/dedis/onet.v1"
-	"gopkg.in/dedis/onet.v1/crypto"
+	"github.com/dedis/onet"
+	"github.com/dedis/onet/crypto"
 
 	"gopkg.in/dedis/crypto.v0/abstract"
 )

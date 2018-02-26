@@ -8,16 +8,19 @@ import (
 	"encoding/base64"
 	urlpkg "net/url"
 
-	decenarch "github.com/dedis/student_17_decenar"
+	decenarch "github.com/si-co/student_17_decenar"
 
-	"gopkg.in/dedis/onet.v1/app"
+	"github.com/dedis/onet/app"
 
-	"gopkg.in/dedis/onet.v1/log"
+	"github.com/dedis/onet/log"
 	"gopkg.in/urfave/cli.v1"
 )
 
 // path to the directory where website will be stored for consultation
-const cachePath = "/tmp/cocache"
+const (
+	cachePath = "/tmp/cocache"
+	suite     = "ed25519" // TODO: This sould probably go in some config file
+)
 
 func main() {
 	log.Info("Start decenarch application")
@@ -66,7 +69,11 @@ func main() {
 		},
 	}
 	cliApp.Flags = []cli.Flag{
-		app.FlagDebug,
+		cli.IntFlag{
+			Name:  "debug, d",
+			Value: 0,
+			Usage: "debug-level: 1 for terse, 5 for maximal",
+		},
 	}
 	cliApp.Before = func(c *cli.Context) error {
 		log.SetDebugVisible(c.Int("debug"))
@@ -87,7 +94,7 @@ func cmdRetrieve(c *cli.Context) error {
 		log.Info("It is possible to provide a timestamp with -t [2006/01/02 15:04]")
 	}
 	group := readGroup(c)
-	client := decenarch.NewClient()
+	client := decenarch.NewClient(suite)
 	resp, err := client.Retrieve(group.Roster, url, timestamp)
 	if err != nil {
 		log.Fatal("When asking to retrieve", url, ":", err)
@@ -126,7 +133,7 @@ func cmdSave(c *cli.Context) error {
 		log.Fatal("Please provide an url.")
 	}
 	group := readGroup(c)
-	client := decenarch.NewClient()
+	client := decenarch.NewClient(suite)
 	resp, err := client.Save(group.Roster, url)
 	if err != nil {
 		log.Fatal("When asking to save", url, ":", err)
@@ -139,7 +146,7 @@ func cmdSave(c *cli.Context) error {
 func cmdSkipStart(c *cli.Context) error {
 	log.Info("SkipStart command")
 	group := readGroup(c)
-	client := decenarch.NewSkipClient()
+	client := decenarch.NewSkipClient(suite)
 	resp, err := client.SkipStart(group.Roster)
 	if err != nil {
 		log.Fatal("When asking to start skipchain", err)
