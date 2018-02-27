@@ -15,8 +15,8 @@ package main
 import (
 	// Here you can import any other needed service for your conode.
 	"github.com/dedis/onet/app"
-	_ "github.com/si-co/student_17_decenar/service"
-	_ "github.com/si-co/student_17_decenar/skipservice"
+	_ "github.com/dedis/student_18_decenar/service"
+	_ "github.com/dedis/student_18_decenar/skipservice"
 	_ "gopkg.in/dedis/cothority.v1/cosi/service"
 	_ "gopkg.in/dedis/cothority.v1/skipchain"
 	_ "gopkg.in/dedis/cothority.v1/status/service"

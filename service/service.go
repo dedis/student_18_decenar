@@ -16,16 +16,16 @@ import (
 	"encoding/base64"
 	urlpkg "net/url"
 
-	"github.com/dedis/student_17_decenar"
-	"github.com/dedis/student_17_decenar/protocol"
+	"github.com/dedis/student_18_decenar"
+	"github.com/dedis/student_18_decenar/protocol"
 	"golang.org/x/net/html"
 
 	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
 
-	"gopkg.in/dedis/crypto.v0/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
+	"gopkg.in/dedis/crypto.v0/cosi"
 )
 
 // Used for tests

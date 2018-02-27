@@ -9,7 +9,7 @@ import (
 	"github.com/dedis/onet/network"
 	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
 
-	"github.com/dedis/student_17_decenar/protocol"
+	"github.com/dedis/student_18_decenar/protocol"
 )
 
 // We need to register all messages so the network knows how to handle them.
