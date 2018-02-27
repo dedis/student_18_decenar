@@ -13,13 +13,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/dedis/student_17_decenar"
+	"github.com/dedis/student_18_decenar"
 	skipchain "gopkg.in/dedis/cothority.v1/skipchain"
 
-	"gopkg.in/dedis/crypto.v0/cosi"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
+	"gopkg.in/dedis/kyber.v1/sign/cosi"
 )
 
 // Used for tests
