@@ -25,7 +25,7 @@ import (
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
-	"gopkg.in/dedis/crypto.v0/cosi"
+	"gopkg.in/dedis/kyber.v1/sign/cosi"
 )
 
 // Used for tests
