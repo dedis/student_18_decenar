@@ -16,10 +16,11 @@ import (
 	"gopkg.in/urfave/cli.v1"
 )
 
+// TODO: these values should probably go in some config file
 // path to the directory where website will be stored for consultation
 const (
 	cachePath = "/tmp/cocache"
-	suite     = "ed25519" // TODO: This sould probably go in some config file
+	suite     = "ed25519"
 )
 
 func main() {
