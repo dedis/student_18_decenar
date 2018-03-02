@@ -23,13 +23,11 @@ import (
 
 	"github.com/dedis/cothority"
 	"github.com/dedis/cothority/ftcosi/check"
-	_ "github.com/dedis/cothority/ftcosi/service"
-	_ "github.com/dedis/cothority/identity"
-	_ "github.com/dedis/cothority/skipchain"
-	_ "github.com/dedis/cothority/status/service"
 	"github.com/dedis/onet/app"
 	"github.com/dedis/onet/cfgpath"
 	"github.com/dedis/onet/log"
+	_ "github.com/dedis/student_18_decenar/service"
+	_ "github.com/dedis/student_18_decenar/skipservice"
 	"gopkg.in/urfave/cli.v1"
 )
 

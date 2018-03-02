@@ -48,7 +48,7 @@ type SkipService struct {
 
 // skipstorageID reflects the data we're storing - we could store more
 // than one structure.
-const skipstorageID = "main"
+var skipstorageID = []byte("main")
 
 // skipMin is the number of minutes between each block creation
 // TODO original value 10

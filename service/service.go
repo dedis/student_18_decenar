@@ -52,7 +52,7 @@ type Service struct {
 
 // storageID reflects the data we're storing - we could store more
 // than one structure.
-const storageID = "main"
+var storageID = []byte("main")
 
 type storage struct {
 	sync.Mutex
