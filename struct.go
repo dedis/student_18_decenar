@@ -32,7 +32,6 @@ const (
 // SaveRequest will save the website in the conodes using the protocol and
 // return the exit state of the saving process
 type SaveRequest struct {
-	Suite  string
 	Url    string
 	Roster *onet.Roster
 }
@@ -46,7 +45,6 @@ type SaveResponse struct {
 // RetrieveRequest will retreive the website from the conode using the protocol
 // and return the website file
 type RetrieveRequest struct {
-	Suite     string
 	Url       string
 	Roster    *onet.Roster
 	Timestamp string

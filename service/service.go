@@ -168,7 +168,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	webadds = append(webadds, webmain)
 	webproofs = append(webproofs, proofwebmain)
 	log.Lvl4("sending", webadds, "to skipchain")
-	skipclient := decenarch.NewSkipClient(req.Suite)
+	skipclient := decenarch.NewSkipClient()
 	stattimes = append(stattimes, "skipAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	skipclient.SkipAddData(req.Roster, webadds)
 	stattimes = append(stattimes, "saveReqEnd;"+time.Now().Format(decenarch.StatTimeFormat))
@@ -185,7 +185,7 @@ func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.Re
 	log.Lvl3("Decenarch Service new RetrieveRequest:", req)
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
-	skipclient := decenarch.NewSkipClient(req.Suite)
+	skipclient := decenarch.NewSkipClient()
 	resp, err := skipclient.SkipGetData(req.Roster, req.Url, req.Timestamp)
 	if err != nil {
 		return nil, err

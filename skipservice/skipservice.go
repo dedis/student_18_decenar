@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 
 	skipchain "github.com/dedis/cothority/skipchain"
-	"github.com/dedis/student_18_decenar"
+	decenarch "github.com/dedis/student_18_decenar"
 
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
