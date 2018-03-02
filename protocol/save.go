@@ -209,6 +209,7 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 		// For the moment, we use the Cosi API at service level
 	case End:
 		log.Lvl4("End Phase")
+		msg.SaveAnnounce.MasterTreeSig = []byte("") // TODO: MasterTreeSig should be optional in the message, using pointer
 		p.SendToChildren(&msg.SaveAnnounce)
 	default:
 		log.Lvl1("Unknown phase passed by", p, "msg:", msg)
@@ -309,7 +310,6 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 		var requestedHash string
 		if p.MasterHash != nil && len(p.MasterHash) > 0 {
 			requestedHash = getRequestedMissingHash(p)
-			//h := p.Suite().(kyber.HashFactory).Hash()
 			for _, r := range reply {
 				if plain, ok := r.RequestedData[requestedHash]; ok {
 					hashedData := p.Suite().(kyber.HashFactory).Hash().Sum(plain)
@@ -373,7 +373,7 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 
 	}
 	defer p.Done()
-	return errors.New("The protocol has skip the reply handling.")
+	return nil
 }
 
 // GetLocalData retrieve the data from the p.Url and handle it to make it either a AnonNodes tree
