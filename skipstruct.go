@@ -5,7 +5,7 @@ This holds the messages used to communicate with the service over the network.
 */
 
 import (
-	skipchain "gopkg.in/dedis/cothority.v1/skipchain"
+	skipchain "github.com/dedis/cothority/skipchain"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/network"
 )

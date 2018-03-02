@@ -13,9 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dedis/kyber/suites"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
+	//"gopkg.in/dedis/kyber.v1/suites"
+	"github.com/dedis/kyber/suites"
 )
 
 // ServiceName is used for registration on the onet.
@@ -34,12 +35,12 @@ func NewClient(suite string) *Client {
 }
 
 // Save will record the website requested in the conodes
-func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, error) {
+func (c *Client) Save(suite string, r *onet.Roster, url string) (*SaveResponse, error) {
 	dst := r.RandomServerIdentity()
 	log.Lvl4("Sending message to", dst)
 	resp := &SaveResponse{Times: make([]string, 0)}
 	resp.Times = append(resp.Times, "genstart;"+time.Now().Format(StatTimeFormat))
-	err := c.SendProtobuf(dst, &SaveRequest{url, r}, resp)
+	err := c.SendProtobuf(dst, &SaveRequest{suite, url, r}, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +89,7 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, error) {
 }
 
 // Retrieve will send the website requested to the client
-func (c *Client) Retrieve(r *onet.Roster, url string, timestamp string) (*RetrieveResponse, error) {
+func (c *Client) Retrieve(suite string, r *onet.Roster, url string, timestamp string) (*RetrieveResponse, error) {
 	// if no timestamp is given, take 'now as timestamp'
 	if timestamp == "" {
 		t := time.Now()

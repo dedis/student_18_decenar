@@ -95,7 +95,7 @@ func cmdRetrieve(c *cli.Context) error {
 	}
 	group := readGroup(c)
 	client := decenarch.NewClient(suite)
-	resp, err := client.Retrieve(group.Roster, url, timestamp)
+	resp, err := client.Retrieve(suite, group.Roster, url, timestamp)
 	if err != nil {
 		log.Fatal("When asking to retrieve", url, ":", err)
 	}
@@ -134,7 +134,7 @@ func cmdSave(c *cli.Context) error {
 	}
 	group := readGroup(c)
 	client := decenarch.NewClient(suite)
-	resp, err := client.Save(group.Roster, url)
+	resp, err := client.Save(suite, group.Roster, url)
 	if err != nil {
 		log.Fatal("When asking to save", url, ":", err)
 	}

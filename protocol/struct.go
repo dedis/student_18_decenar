@@ -11,9 +11,8 @@ import (
 	"golang.org/x/net/html"
 
 	"github.com/dedis/onet"
-	"github.com/dedis/onet/crypto"
-
-	"gopkg.in/dedis/crypto.v0/abstract"
+	//"gopkg.in/dedis/kyber.v1"
+	"github.com/dedis/kyber"
 )
 
 // Name can be used from other packages to refer to this protocol.
@@ -45,8 +44,8 @@ type SaveAnnounce struct {
 	Phase         SavePhase
 	Url           string
 	MasterTree    []ExplicitNode
-	MasterTreeSig crypto.SchnorrSig
-	MasterHash    map[string]map[abstract.Point]crypto.SchnorrSig
+	MasterTreeSig []byte
+	MasterHash    map[string]map[kyber.Point][]byte
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -68,7 +67,7 @@ type StructSaveAnnounce struct {
 //     SeenMap : the map of the Seen field of each service of each conode. the
 //               keys are the public keys of the conode.
 //     SigMap : the map of the signature associatied with the Seen field of each
-//              conodes. For a given public key (abstract.Point) both SigMap and
+//              conodes. For a given public key (kyber.Point) both SigMap and
 //              SeenMap must have an entry
 //
 //     RequestedNode : the map linking the hash of an AnonNode's data with its
@@ -80,11 +79,11 @@ type SaveReply struct {
 	Url           string
 	Errs          []error
 	MasterTree    []ExplicitNode //*AnonNode
-	MasterTreeSig crypto.SchnorrSig
-	MasterHash    map[string]map[abstract.Point]crypto.SchnorrSig
+	MasterTreeSig []byte
+	MasterHash    map[string]map[kyber.Point][]byte
 
 	SeenMap map[string][]byte
-	SigMap  map[string]crypto.SchnorrSig
+	SigMap  map[string][]byte
 
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte

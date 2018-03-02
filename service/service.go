@@ -8,6 +8,7 @@ runs on the node.
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"sync"
@@ -20,12 +21,14 @@ import (
 	"github.com/dedis/student_18_decenar/protocol"
 	"golang.org/x/net/html"
 
-	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
+	cosiservice "github.com/dedis/cothority/ftcosi/service"
 
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
-	"gopkg.in/dedis/kyber.v1/sign/cosi"
+	//"gopkg.in/dedis/kyber.v1/sign/cosi"
+
+	"github.com/dedis/kyber/sign/cosi"
 )
 
 // Used for tests
@@ -57,14 +60,14 @@ type storage struct {
 
 // SaveRequest is the function called by the service when a client want to save a website in the
 // archive.
-func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveResponse, onet.ClientError) {
+func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
 	stattimes := make([]string, 0)
 	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	log.Lvl3("Decenarch Service new SaveRequest")
 	numNodes := len(req.Roster.List)
 	tree := req.Roster.GenerateNaryTreeWithRoot(numNodes-1, s.ServerIdentity())
 	if tree == nil {
-		return nil, onet.NewClientErrorCode(decenarch.ErrorParse, "couldn't create tree")
+		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
 	}
 
 	// IMPROVEMENT threshold should be easily configurable
@@ -72,7 +75,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
-		return nil, onet.NewClientErrorCode(4042, err.Error())
+		return nil, err
 	}
 	pi.(*protocol.SaveMessage).Url = req.Url
 	pi.(*protocol.SaveMessage).Threshold = threshold
@@ -91,7 +94,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	cosiclient := cosiservice.NewClient()
 	sig, sigErr := cosiclient.SignatureRequest(req.Roster, msgToSign)
 	if sigErr != nil {
-		return nil, onet.NewClientErrorCode(4042, err.Error())
+		return nil, sigErr
 	}
 	stattimes = append(stattimes, "saveCreaStructStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	mainTimestamp := time.Now().Format("2006/01/02 15:04")
@@ -165,7 +168,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	webadds = append(webadds, webmain)
 	webproofs = append(webproofs, proofwebmain)
 	log.Lvl4("sending", webadds, "to skipchain")
-	skipclient := decenarch.NewSkipClient()
+	skipclient := decenarch.NewSkipClient(req.Suite)
 	stattimes = append(stattimes, "skipAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	skipclient.SkipAddData(req.Roster, webadds)
 	stattimes = append(stattimes, "saveReqEnd;"+time.Now().Format(decenarch.StatTimeFormat))
@@ -178,11 +181,11 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 }
 
 // RetrieveRequest
-func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, onet.ClientError) {
+func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, error) {
 	log.Lvl3("Decenarch Service new RetrieveRequest:", req)
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
-	skipclient := decenarch.NewSkipClient()
+	skipclient := decenarch.NewSkipClient(req.Suite)
 	resp, err := skipclient.SkipGetData(req.Roster, req.Url, req.Timestamp)
 	if err != nil {
 		return nil, err
@@ -193,28 +196,30 @@ func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.Re
 	mainPage := resp.MainPage.Page
 	bPage, bErr := base64.StdEncoding.DecodeString(mainPage)
 	if bErr != nil {
-		return nil, onet.NewClientError(bErr)
+		return nil, bErr
 	}
 	log.Lvl4("service-RetrieveRequest-verify signature")
-	vsigErr := cosi.VerifySignature(
-		network.Suite,
+	vsigErr := cosi.Verify(
+		s.Suite().(cosi.Suite),
 		req.Roster.Publics(),
 		bPage,
-		resp.MainPage.Sig.Signature)
+		resp.MainPage.Sig.Signature,
+		cosi.CompletePolicy{})
 	if vsigErr != nil {
 		log.Lvl1(vsigErr)
-		return nil, onet.NewClientError(vsigErr)
+		return nil, vsigErr
 	}
 	for _, addUrl := range resp.MainPage.AddsUrl {
 		for _, addPage := range resp.AllPages {
 			if addUrl == addPage.Url {
 				baPage, baErr := base64.StdEncoding.DecodeString(addPage.Page)
 				if baErr == nil {
-					sErr := cosi.VerifySignature(
-						network.Suite,
+					sErr := cosi.Verify(
+						s.Suite().(cosi.Suite),
 						req.Roster.Publics(),
 						baPage,
-						addPage.Sig.Signature)
+						addPage.Sig.Signature,
+						cosi.CompletePolicy{})
 					if sErr == nil {
 						returnResp.Adds = append(returnResp.Adds, addPage)
 					} else {
@@ -255,12 +260,12 @@ func (s *Service) save() {
 // if it finds a valid config-file.
 func (s *Service) tryLoad() error {
 	s.storage = &storage{}
-	if !s.DataAvailable(storageID) {
-		return nil
-	}
 	msg, err := s.Load(storageID)
 	if err != nil {
 		return err
+	}
+	if msg == nil {
+		return nil
 	}
 	var ok bool
 	s.storage, ok = msg.(*storage)
@@ -273,17 +278,18 @@ func (s *Service) tryLoad() error {
 // newService receives the context that holds information about the node it's
 // running on. Saving and loading can be done using the context. The data will
 // be stored in memory for tests and simulations, and on disk for real deployments.
-func newService(c *onet.Context) onet.Service {
+func newService(c *onet.Context) (onet.Service, error) {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
 	}
 	if err := s.RegisterHandlers(s.SaveRequest, s.RetrieveRequest); err != nil {
-		log.ErrFatal(err, "Couldn't register messages")
+		log.Error(err, "Couldn't register messages")
+		return nil, err
 	}
 	if err := s.tryLoad(); err != nil {
 		log.Error(err)
 	}
-	return s
+	return s, nil
 }
 
 // ExtractPageExternalLinks take html webpage as a buffer and extract the

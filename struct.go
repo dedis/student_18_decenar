@@ -5,9 +5,9 @@ This holds the messages used to communicate with the service over the network.
 */
 
 import (
+	cosiservice "github.com/dedis/cothority/ftcosi/service"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/network"
-	cosiservice "gopkg.in/dedis/cothority.v1/cosi/service"
 
 	"github.com/dedis/student_18_decenar/protocol"
 )
@@ -32,6 +32,7 @@ const (
 // SaveRequest will save the website in the conodes using the protocol and
 // return the exit state of the saving process
 type SaveRequest struct {
+	Suite  string
 	Url    string
 	Roster *onet.Roster
 }
@@ -45,6 +46,7 @@ type SaveResponse struct {
 // RetrieveRequest will retreive the website from the conode using the protocol
 // and return the website file
 type RetrieveRequest struct {
+	Suite     string
 	Url       string
 	Roster    *onet.Roster
 	Timestamp string

@@ -19,17 +19,19 @@ import (
 	"sort"
 	"strings"
 
-	"golang.org/x/net/html"
 	"net/http"
 	urlpkg "net/url"
 
-	"gopkg.in/dedis/crypto.v0/abstract"
-	"gopkg.in/dedis/kyber.v1"
+	"golang.org/x/net/html"
+
+	//"gopkg.in/dedis/kyber.v1"
+	"github.com/dedis/kyber"
 
 	"github.com/dedis/onet"
-	"github.com/dedis/onet/crypto"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
+	//"gopkg.in/dedis/kyber.v1/sign/schnorr"
+	"github.com/dedis/kyber/sign/schnorr"
 )
 
 func init() {
@@ -307,13 +309,10 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 		var requestedHash string
 		if p.MasterHash != nil && len(p.MasterHash) > 0 {
 			requestedHash = getRequestedMissingHash(p)
+			//h := p.Suite().(kyber.HashFactory).Hash()
 			for _, r := range reply {
 				if plain, ok := r.RequestedData[requestedHash]; ok {
-					hashedData, hashErr := crypto.HashBytes(network.Suite.Hash(), plain)
-					if hashErr != nil {
-						p.Errs = append(p.Errs, hashErr)
-						continue
-					}
+					hashedData := p.Suite().(kyber.HashFactory).Hash().Sum(plain)
 					if base64.StdEncoding.EncodeToString(hashedData) == requestedHash {
 						p.PlainData[requestedHash] = plain
 					}
@@ -410,13 +409,9 @@ func (p *SaveMessage) GetLocalData() (*AnonNode, map[string]map[kyber.Point][]by
 			log.Lvl1("Error: Impossible to read http request body!")
 			return nil, nil, readErr
 		}
-		hashedData, hashErr := crypto.HashBytes(network.Suite.Hash(), rawData)
-		if hashErr != nil {
-			log.Lvl1("Error: Impossible to hash data!")
-			return nil, nil, hashErr
-		}
+		hashedData := p.Suite().(kyber.HashFactory).Hash().Sum(rawData)
 		locHashKey := base64.StdEncoding.EncodeToString(hashedData)
-		sig, sigErr := crypto.SignSchnorr(network.Suite, p.Private(), []byte(locHashKey))
+		sig, sigErr := schnorr.Sign(p.Suite(), p.Private(), []byte(locHashKey))
 		if sigErr != nil {
 			log.Lvl1("Error: Impossible to sign data!")
 			return nil, nil, sigErr
@@ -493,7 +488,7 @@ func htmlToAnonTree(p *SaveMessage, root *html.Node) *AnonNode {
 // the node locally as plaintext.
 func htmlToAnonNode(p *SaveMessage, hn *html.Node) *AnonNode {
 	var anonNode *AnonNode = &AnonNode{}
-	hashedData := hashHtmlData(hn)
+	hashedData := hashHtmlData(p, hn)
 	anonNode.HashedData = hashedData
 	anonNode.Seen = true
 
@@ -507,7 +502,7 @@ func htmlToAnonNode(p *SaveMessage, hn *html.Node) *AnonNode {
 // The "data fields" are all the attributes of an html Nodes except the ones
 // related to its position in the html tree. Furthermore, the list hn.Attr is
 // sorted before the hashing process.
-func hashHtmlData(hn *html.Node) string {
+func hashHtmlData(p *SaveMessage, hn *html.Node) string {
 	if hn == nil {
 		return ""
 	}
@@ -520,10 +515,7 @@ func hashHtmlData(hn *html.Node) string {
 	sort.Sort(sort.StringSlice(attrList))
 
 	data := []byte(hn.Namespace + hn.Data + strings.Join(attrList, ""))
-	hashedData, hashErr := crypto.HashBytes(network.Suite.Hash(), data)
-	if hashErr != nil {
-		log.Fatal("Error during hashing the data of an html node")
-	}
+	hashedData := p.Suite().(kyber.HashFactory).Hash().Sum(data)
 
 	return base64.StdEncoding.EncodeToString(hashedData)
 }
@@ -547,23 +539,23 @@ func createLocalSig(p *SaveMessage, masterTree []ExplicitNode) ([]byte, error) {
 	if len(masterTree) != len(seen) {
 		return nil, errors.New("createLocalSig - not all nodes were tagged")
 	}
-	hashToSign, hErr := GetExplicitSeenHash(masterTree, seen)
+	hashToSign, hErr := getExplicitSeenHash(p, masterTree, seen)
 	if hErr != nil {
 		return nil, hErr
 	}
-	sig, sigErr := crypto.SignSchnorr(network.Suite, p.Private(), hashToSign)
+	sig, sigErr := schnorr.Sign(p.Suite(), p.Private(), hashToSign)
 	if sigErr != nil {
 		return nil, sigErr
 	}
 	return sig, nil
 }
 
-// GetExplicitSeenHash take an explicit tree en and an array seen where
+// getExplicitSeenHash take an explicit tree en and an array seen where
 // seen[i] = true iff the conode has seen en[i] on its locally retrieved webdata
 // else, seen[i] = false.
 // It creates a hash of the tree represented as a byte array of the hashed data
 // followed by the index of the children if the node is seen or a 0 if not.
-func GetExplicitSeenHash(en []ExplicitNode, seen []bool) ([]byte, error) {
+func getExplicitSeenHash(p *SaveMessage, en []ExplicitNode, seen []bool) ([]byte, error) {
 	if len(en) != len(seen) {
 		return nil, errors.New("createLocalSig - not all nodes were tagged")
 	}
@@ -579,10 +571,7 @@ func GetExplicitSeenHash(en []ExplicitNode, seen []bool) ([]byte, error) {
 			data = append(data, emptyNode)
 		}
 	}
-	hash, hErr := crypto.HashBytes(network.Suite.Hash(), data)
-	if hErr != nil {
-		return nil, hErr
-	}
+	hash := p.Suite().(kyber.HashFactory).Hash().Sum(data)
 	return hash, nil
 }
 
@@ -721,8 +710,8 @@ func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[kyber.Point][
 	if p.MasterHash != nil && len(p.MasterHash) > 0 {
 		for img, sigmap := range locHash {
 			for srv, sig := range sigmap {
-				vErr := crypto.VerifySchnorr(
-					network.Suite,
+				vErr := schnorr.Verify(
+					p.Suite(),
 					srv,
 					[]byte(img),
 					sig)
@@ -738,8 +727,8 @@ func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[kyber.Point][
 		for _, r := range reply {
 			for img, sigmap := range r.SaveReply.MasterHash {
 				for srv, sig := range sigmap {
-					vErr := crypto.VerifySchnorr(
-						network.Suite,
+					vErr := schnorr.Verify(
+						p.Suite(),
 						srv,
 						[]byte(img),
 						sig)
@@ -769,12 +758,12 @@ func getValidOnlySeenSig(p *SaveMessage) (map[kyber.Point][]bool, map[kyber.Poin
 	for i, _ := range allSeen {
 		allSeen[i] = true
 	}
-	masterHash, mhErr := GetExplicitSeenHash(masterExplicit, allSeen)
+	masterHash, mhErr := getExplicitSeenHash(p, masterExplicit, allSeen)
 	if mhErr != nil {
 		return nil, nil, mhErr
 	}
-	vMErr := crypto.VerifySchnorr(
-		network.Suite,
+	vMErr := schnorr.Verify(
+		p.Suite(),
 		p.Root().ServerIdentity.Public,
 		masterHash,
 		p.MasterTreeSig)
@@ -787,10 +776,10 @@ func getValidOnlySeenSig(p *SaveMessage) (map[kyber.Point][]bool, map[kyber.Poin
 	for _, kp := range (p.Roster()).Publics() {
 		if seen, ok := p.SeenMap[kp.String()]; ok {
 			if sig, sok := p.SeenSig[kp.String()]; sok {
-				slaveHash, shErr := GetExplicitSeenHash(masterExplicit, seen)
+				slaveHash, shErr := getExplicitSeenHash(p, masterExplicit, seen)
 				if shErr == nil {
-					vsErr := crypto.VerifySchnorr(
-						network.Suite,
+					vsErr := schnorr.Verify(
+						p.Suite(),
 						kp,
 						slaveHash,
 						sig)
@@ -899,8 +888,8 @@ func getRequestedMissingHash(p *SaveMessage) string {
 		if len(sigs) >= int(p.Threshold) {
 			verifiedSig := 0
 			for srv, sig := range sigs {
-				vErr := crypto.VerifySchnorr(
-					network.Suite,
+				vErr := schnorr.Verify(
+					p.Suite(),
 					srv,
 					[]byte(dataH),
 					sig)

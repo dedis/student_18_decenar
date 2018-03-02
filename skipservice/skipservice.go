@@ -13,13 +13,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
+	skipchain "github.com/dedis/cothority/skipchain"
 	"github.com/dedis/student_18_decenar"
-	skipchain "gopkg.in/dedis/cothority.v1/skipchain"
 
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
-	"gopkg.in/dedis/kyber.v1/sign/cosi"
+	//"gopkg.in/dedis/kyber.v1/sign/cosi"
+	"github.com/dedis/kyber/sign/cosi"
 )
 
 // Used for tests
@@ -61,7 +62,7 @@ type skipstorage struct {
 
 // SkipRootStartRequest create a genesis block and begin a new skipchain
 // it should not be used without SkipStartRequest.
-func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) (*decenarch.SkipRootStartResponse, onet.ClientError) {
+func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) (*decenarch.SkipRootStartResponse, error) {
 	log.Lvl1("SkipRootStartRequest execution")
 	skipclient := skipchain.NewClient()
 	// here we assume the skipchain will be forwarded to other member of the roster
@@ -86,7 +87,7 @@ func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) 
 // will create a skipblock every skipMin minutes. No data verification will
 // be done. We assume it is done before when storing the data in s.data in the
 // SkipAddDataRequest function.
-func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decenarch.SkipStartResponse, onet.ClientError) {
+func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decenarch.SkipStartResponse, error) {
 	log.Lvl1("SkipStartRequest execution")
 	skipclient := skipchain.NewClient()
 	go func() {
@@ -151,14 +152,14 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 }
 
 // SkipStopRequest sends a signal to the service to stop the loop of skipblock creation
-func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarch.SkipStopResponse, onet.ClientError) {
+func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarch.SkipStopResponse, error) {
 	s.stopsignal = true
 	return &decenarch.SkipStopResponse{}, nil
 }
 
 // SkipAddDataRequest receive webstore data, verify their integrity and store
 // the valid data inside the service waiting for them to be put on the skipchain
-func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, onet.ClientError) {
+func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, error) {
 	log.Lvl4("SkipAddDataRequest - Begin")
 	s.data = make([]decenarch.Webstore, 0)
 	for _, d := range req.Data {
@@ -166,15 +167,16 @@ func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*de
 		// verify signature
 		bd, bdErr := base64.StdEncoding.DecodeString(d.Page)
 		if bdErr != nil {
-			return nil, onet.NewClientError(bdErr)
+			return nil, bdErr
 		}
-		vsErr := cosi.VerifySignature(
-			network.Suite,
+		vsErr := cosi.Verify(
+			s.Suite().(cosi.Suite),
 			req.Roster.Publics(),
 			bd,
-			d.Sig.Signature)
+			d.Sig.Signature,
+			cosi.CompletePolicy{})
 		if vsErr != nil {
-			return nil, onet.NewClientError(vsErr)
+			return nil, vsErr
 		}
 		// effectively add data
 		s.dataChan <- d
@@ -184,14 +186,14 @@ func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*de
 	return &decenarch.SkipAddDataResponse{}, nil
 }
 
-func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*decenarch.SkipGetDataResponse, onet.ClientError) {
+func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*decenarch.SkipGetDataResponse, error) {
 	log.Lvl4("Begin GetData request on service")
 	s.skipstorage.Lock()
 	lastKnowID := s.skipstorage.LastSkipBlockID
 	s.skipstorage.Unlock()
 	tReq, trErr := time.Parse("2006/01/02 15:04", req.Timestamp)
 	if trErr != nil {
-		return nil, onet.NewClientError(trErr)
+		return nil, trErr
 	}
 
 	skipclient := skipchain.NewClient()
@@ -234,7 +236,7 @@ func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*de
 		}
 	}
 
-	return nil, onet.NewClientErrorCode(4242, "Could not find block in skipchain")
+	return nil, errors.New("Could not find block in skipchain")
 }
 
 // NewProtocol is called on all nodes of a Tree (except the root, since it is
@@ -263,12 +265,12 @@ func (s *SkipService) save() {
 // if it finds a valid config-file.
 func (s *SkipService) tryLoad() error {
 	s.skipstorage = &skipstorage{}
-	if !s.DataAvailable(skipstorageID) {
-		return nil
-	}
 	msg, err := s.Load(skipstorageID)
 	if err != nil {
 		return err
+	}
+	if msg == nil {
+		return nil
 	}
 	var ok bool
 	s.skipstorage, ok = msg.(*skipstorage)
@@ -281,24 +283,26 @@ func (s *SkipService) tryLoad() error {
 // newService receives the context that holds information about the node it's
 // running on. Saving and loading can be done using the context. The data will
 // be stored in memory for tests and simulations, and on disk for real deployments.
-func newService(c *onet.Context) onet.Service {
+func newService(c *onet.Context) (onet.Service, error) {
 	s := &SkipService{
 		ServiceProcessor: onet.NewServiceProcessor(c),
 		data:             make([]decenarch.Webstore, 0),
 		dataChan:         make(chan decenarch.Webstore),
 	}
-	if err := s.RegisterHandlers(
+	err := s.RegisterHandlers(
 		s.SkipRootStartRequest,
 		s.SkipStartRequest,
 		s.SkipStopRequest,
 		s.SkipAddDataRequest,
-		s.SkipGetDataRequest); err != nil {
-		log.ErrFatal(err, "Couldn't register messages")
+		s.SkipGetDataRequest)
+	if err != nil {
+		log.Error(err, "Couldn't register messages")
+		return nil, err
 	}
-	if err := s.tryLoad(); err != nil {
+	if err = s.tryLoad(); err != nil {
 		log.Error(err)
 	}
-	return s
+	return s, err
 }
 
 // webstoreExtractAndConvert takes an array of Webstore and do three things:

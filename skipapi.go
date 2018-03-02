@@ -11,9 +11,10 @@ This part of the service runs on the client or the app.
 import (
 	"time"
 
-	"github.com/dedis/kyber/suites"
+	"github.com/dedis/cothority"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
+	//"gopkg.in/dedis/kyber.v1/suites"
 )
 
 // ServiceName is used for registration on the onet.
@@ -27,7 +28,8 @@ type SkipClient struct {
 
 // NewClient instantiates a new decenarch.Client
 func NewSkipClient(suite string) *SkipClient {
-	return &SkipClient{Client: onet.NewClient(suites.MustFind(suite), SkipServiceName)}
+	//return &SkipClient{Client: onet.NewClient(suites.MustFind(suite), SkipServiceName)}
+	return &SkipClient{Client: onet.NewClient(cothority.Suite, SkipServiceName)}
 }
 
 // SkipStart starts the infinite skipblocks creations loop on all the conodes.
