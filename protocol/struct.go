@@ -10,9 +10,8 @@ so that it can find out who sent the message.
 import (
 	"golang.org/x/net/html"
 
-	"github.com/dedis/onet"
-	//"gopkg.in/dedis/kyber.v1"
-	"github.com/dedis/kyber"
+	"gopkg.in/dedis/kyber.v2"
+	"gopkg.in/dedis/onet.v2"
 )
 
 // Name can be used from other packages to refer to this protocol.

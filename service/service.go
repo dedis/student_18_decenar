@@ -21,14 +21,12 @@ import (
 	"github.com/dedis/student_18_decenar/protocol"
 	"golang.org/x/net/html"
 
-	cosiservice "github.com/dedis/cothority/ftcosi/service"
+	cosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
 
-	"github.com/dedis/onet"
-	"github.com/dedis/onet/log"
-	"github.com/dedis/onet/network"
-	//"gopkg.in/dedis/kyber.v1/sign/cosi"
-
-	"github.com/dedis/kyber/sign/cosi"
+	"gopkg.in/dedis/kyber.v2/sign/cosi"
+	"gopkg.in/dedis/onet.v2"
+	"gopkg.in/dedis/onet.v2/log"
+	"gopkg.in/dedis/onet.v2/network"
 )
 
 // Used for tests

@@ -10,9 +10,9 @@ import (
 
 	decenarch "github.com/dedis/student_18_decenar"
 
-	"github.com/dedis/onet/app"
+	"gopkg.in/dedis/onet.v2/app"
 
-	"github.com/dedis/onet/log"
+	"gopkg.in/dedis/onet.v2/log"
 	"gopkg.in/urfave/cli.v1"
 )
 

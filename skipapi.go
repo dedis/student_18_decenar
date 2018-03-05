@@ -11,9 +11,8 @@ This part of the service runs on the client or the app.
 import (
 	"time"
 
-	"github.com/dedis/onet"
-	"github.com/dedis/onet/log"
-	//"gopkg.in/dedis/kyber.v1/suites"
+	"gopkg.in/dedis/onet.v2"
+	"gopkg.in/dedis/onet.v2/log"
 )
 
 // ServiceName is used for registration on the onet.

@@ -24,14 +24,12 @@ import (
 
 	"golang.org/x/net/html"
 
-	//"gopkg.in/dedis/kyber.v1"
-	"github.com/dedis/kyber"
+	"gopkg.in/dedis/kyber.v2"
 
-	"github.com/dedis/onet"
-	"github.com/dedis/onet/log"
-	"github.com/dedis/onet/network"
-	//"gopkg.in/dedis/kyber.v1/sign/schnorr"
-	"github.com/dedis/kyber/sign/schnorr"
+	"gopkg.in/dedis/kyber.v2/sign/schnorr"
+	"gopkg.in/dedis/onet.v2"
+	"gopkg.in/dedis/onet.v2/log"
+	"gopkg.in/dedis/onet.v2/network"
 )
 
 func init() {

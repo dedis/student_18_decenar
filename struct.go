@@ -5,9 +5,9 @@ This holds the messages used to communicate with the service over the network.
 */
 
 import (
-	cosiservice "github.com/dedis/cothority/ftcosi/service"
-	"github.com/dedis/onet"
-	"github.com/dedis/onet/network"
+	cosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
+	"gopkg.in/dedis/onet.v2"
+	"gopkg.in/dedis/onet.v2/network"
 
 	"github.com/dedis/student_18_decenar/protocol"
 )

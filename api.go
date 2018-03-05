@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dedis/onet"
-	"github.com/dedis/onet/log"
+	"gopkg.in/dedis/onet.v2"
+	"gopkg.in/dedis/onet.v2/log"
 )
 
 // ServiceName is used for registration on the onet.
