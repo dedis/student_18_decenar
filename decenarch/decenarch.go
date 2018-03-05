@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	urlpkg "net/url"
 
 	decenarch "github.com/dedis/student_18_decenar"
+	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/onet.v2/app"
 
@@ -104,7 +106,13 @@ func cmdRetrieve(c *cli.Context) error {
 	if bErr != nil {
 		return bErr
 	}
-	p, pErr := storeWebPageOnDisk(resp.Main.Url, bPage)
+	// modify images links
+	mbPage, err := changeImgSrc(bPage, resp.Main.Url)
+	if err != nil {
+		return err
+	}
+	// store main pag on disk
+	p, pErr := storeWebPageOnDisk(resp.Main.Url, mbPage)
 	if pErr != nil {
 		return pErr
 	}
@@ -176,23 +184,15 @@ func readGroup(c *cli.Context) *app.Group {
 // Example: url==http://my.example.ext/folder/file.fext will be stored in
 // $cachePath/ext/example/my/folder/file.fext and file.fext will contains bData
 func storeWebPageOnDisk(mUrl string, bData []byte) (string, error) {
-	pUrl, puErr := urlpkg.Parse(mUrl)
-	if puErr != nil {
-		return "", puErr
+	folderPath, filePath, err := getFolderAndFilePath(mUrl)
+	if err != nil {
+		return "", nil
 	}
-	var urlDir string
-	for _, dom := range strings.Split(pUrl.Host, ".") {
-		urlDir = dom + "/" + urlDir
-	}
-	locDir, locFile := path.Split(pUrl.Path)
-	if locFile == "" {
-		locFile = "index.html"
-	}
-	mkErr := os.MkdirAll(path.Join(cachePath, urlDir, locDir), os.ModePerm|os.ModeDir)
+	mkErr := os.MkdirAll(folderPath, os.ModePerm|os.ModeDir)
 	if mkErr != nil {
 		return "", mkErr
 	}
-	mainFile, mfErr := os.Create(path.Join(cachePath, urlDir, locDir, locFile))
+	mainFile, mfErr := os.Create(filePath)
 	if mfErr != nil {
 		return "", mfErr
 	}
@@ -200,5 +200,80 @@ func storeWebPageOnDisk(mUrl string, bData []byte) (string, error) {
 	if writErr != nil {
 		return "", writErr
 	}
-	return path.Join(cachePath, urlDir, locDir, locFile), nil
+	return filePath, nil
+}
+
+func getFolderAndFilePath(url string) (string, string, error) {
+	u, err := urlpkg.Parse(url)
+	if err != nil {
+		return "", "", err
+	}
+	var urlDir string
+	for _, dom := range strings.Split(u.Host, ".") {
+		urlDir = dom + "/" + urlDir
+	}
+	locDir, locFile := path.Split(u.Path)
+	if locFile == "" {
+		locFile = "index.html"
+	}
+	folderPath := path.Join(cachePath, urlDir, locDir)
+	filePath := path.Join(folderPath, locFile)
+
+	return folderPath, filePath, nil
+}
+
+//  changeImgSrc iterates over the entire HTML document and changes
+// the sources of the images to use the images stored on disk
+// when retrieving a web page with deceanrch
+func changeImgSrc(bData []byte, url string) ([]byte, error) {
+	r := bytes.NewReader(bData)
+	doc, err := html.Parse(r)
+	if err != nil {
+		return nil, err
+	}
+
+	// parse and modify html document
+	err = changeNodeImgSrc(doc, url)
+	if err != nil {
+		return nil, err
+	}
+
+	// render modified html document
+	var b bytes.Buffer
+	err = html.Render(&b, doc)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), err
+}
+
+func changeNodeImgSrc(n *html.Node, url string) error {
+	var err error
+	if n.Type == html.ElementNode && n.Data == "img" {
+		for i, a := range n.Attr {
+			if a.Key == "src" {
+				newSrc := ""
+				if strings.Contains(a.Val, "http") {
+					_, newSrc, err = getFolderAndFilePath(a.Val)
+				} else {
+					_, newSrc, err = getFolderAndFilePath(url + "/" + a.Val)
+				}
+				if err != nil {
+					return err
+				}
+				log.Lvlf4("Imgage source changed from %v to %v", a.Val, newSrc)
+				n.Attr[i].Val = newSrc
+				break
+			}
+		}
+
+	}
+
+	// recursively change children
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		changeNodeImgSrc(c, url)
+	}
+
+	return nil
 }
