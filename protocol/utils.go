@@ -149,6 +149,39 @@ func (root *AnonNode) ListLeaves() []*AnonNode {
 	return leaves
 }
 
+// ListUniqueDataLeaves takes the root of an AnonNode tree as input and
+// outputs an array that contains all the unique leaves of the tree. To
+// define if a leaf is unique, the content of the leaf is taken into account.
+// The leaves data are ordered from the most right one to the most left one.
+//     Example:
+//                  R
+//                 /|\
+//     the tree   A D C   will output [F,D,E]
+//               / \   \
+//              D   E   F
+func (root *AnonNode) ListUniqueDataLeaves() []string {
+	var stack []*AnonNode
+	var discovered map[string]bool = make(map[string]bool)
+	var leaves []string = make([]string, 0)
+	var curr *AnonNode
+	stack = append(stack, root)
+	for len(stack) != 0 {
+		l := len(stack)
+		curr = stack[l-1]
+		stack = stack[:l-1]
+		if !discovered[curr.HashedData] {
+			discovered[curr.HashedData] = true
+			for n := curr.FirstChild; n != nil; n = n.NextSibling {
+				stack = append(stack, n)
+			}
+			if curr.FirstChild == nil {
+				leaves = append(leaves, curr.HashedData)
+			}
+		}
+	}
+	return leaves
+}
+
 // ListPaths takes the root of an AnonNode tree as input and output
 // an array of array. The latter is the list of all the paths from leaf to
 // root of the tree. The paths are ordered from the most right path of the
