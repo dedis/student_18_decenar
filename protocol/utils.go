@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"errors"
+
+	"github.com/tylertreat/BoomFilters"
 )
 
 /*
@@ -294,4 +296,13 @@ func convertToExplicitTree(root *AnonNode) []ExplicitNode {
 		}
 	}
 	return explicitTree
+}
+
+type BloomFilter struct {
+	*boom.CountingBloomFilter
+}
+
+func NewOptimalBloomFilter(nLeaves int) *BloomFilter {
+	return &BloomFilter{boom.NewCountingBloomFilter(uint(nLeaves), 8, 0.001)}
+
 }

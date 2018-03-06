@@ -75,18 +75,18 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	if err != nil {
 		return nil, err
 	}
-	pi.(*protocol.SaveMessage).Url = req.Url
-	pi.(*protocol.SaveMessage).Threshold = threshold
+	pi.(*protocol.SaveLocalState).Url = req.Url
+	pi.(*protocol.SaveLocalState).Threshold = threshold
 	stattimes = append(stattimes, "saveProtoStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	go pi.Start()
 	// get result of consensus
 	log.Lvl4("Waiting for protocol data...")
-	rTree := <-pi.(*protocol.SaveMessage).RefTreeChan
-	var realUrl string = <-pi.(*protocol.SaveMessage).StringChan
-	var contentType string = <-pi.(*protocol.SaveMessage).StringChan
-	var msgToSign []byte = <-pi.(*protocol.SaveMessage).MsgToSign
-	smc := <-pi.(*protocol.SaveMessage).SeenMapChan
-	ssc := <-pi.(*protocol.SaveMessage).SeenSigChan
+	rTree := <-pi.(*protocol.SaveLocalState).RefTreeChan
+	var realUrl string = <-pi.(*protocol.SaveLocalState).StringChan
+	var contentType string = <-pi.(*protocol.SaveLocalState).StringChan
+	var msgToSign []byte = <-pi.(*protocol.SaveLocalState).MsgToSign
+	smc := <-pi.(*protocol.SaveLocalState).SeenMapChan
+	ssc := <-pi.(*protocol.SaveLocalState).SeenSigChan
 	stattimes = append(stattimes, "saveCosiStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	// sign the consensus website found
 	cosiclient := cosiservice.NewClient()
@@ -128,15 +128,15 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		log.Lvl4("Get additional", al)
 		api, aerr := s.CreateProtocol(protocol.SaveName, tree)
 		if aerr == nil {
-			api.(*protocol.SaveMessage).Url = al
-			api.(*protocol.SaveMessage).Threshold = threshold
+			api.(*protocol.SaveLocalState).Url = al
+			api.(*protocol.SaveLocalState).Threshold = threshold
 			go api.Start()
-			addrTree := <-api.(*protocol.SaveMessage).RefTreeChan
-			ru := <-api.(*protocol.SaveMessage).StringChan
-			ct := <-api.(*protocol.SaveMessage).StringChan
-			mts := <-api.(*protocol.SaveMessage).MsgToSign
-			addsmc := <-api.(*protocol.SaveMessage).SeenMapChan
-			addssc := <-api.(*protocol.SaveMessage).SeenSigChan
+			addrTree := <-api.(*protocol.SaveLocalState).RefTreeChan
+			ru := <-api.(*protocol.SaveLocalState).StringChan
+			ct := <-api.(*protocol.SaveLocalState).StringChan
+			mts := <-api.(*protocol.SaveLocalState).MsgToSign
+			addsmc := <-api.(*protocol.SaveLocalState).SeenMapChan
+			addssc := <-api.(*protocol.SaveLocalState).SeenSigChan
 			as, asE := cosiclient.SignatureRequest(req.Roster, mts)
 			if asE == nil {
 				aweb := decenarch.Webstore{

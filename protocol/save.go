@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"regexp"
 	"sort"
@@ -22,6 +23,7 @@ import (
 	"net/http"
 	urlpkg "net/url"
 
+	boom "github.com/tylertreat/BoomFilters"
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/kyber.v2"
@@ -38,10 +40,8 @@ func init() {
 	onet.GlobalProtocolRegister(SaveName, NewSaveProtocol)
 }
 
-// SaveMessage just holds a message that is passed to all children. It
-// also defines a channel that will receive the number of children. Only the
-// root-node will write to the channel.
-type SaveMessage struct {
+// SaveLocalState holds the local state of a node when it runs the SaveProtocol
+type SaveLocalState struct {
 	*onet.TreeNodeInstance
 	Phase       SavePhase
 	Errs        []error
@@ -55,6 +55,7 @@ type SaveMessage struct {
 	LocSig        []byte
 	SeenMap       map[string][]bool
 	SeenSig       map[string][]byte
+	BloomFilter   *BloomFilter
 
 	MasterHash map[string]map[kyber.Point][]byte
 
@@ -72,7 +73,7 @@ type SaveMessage struct {
 // NewSaveProtocol initialises the structure for use in one round
 func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	log.Lvl4("Creating NewSaveProtocol")
-	t := &SaveMessage{
+	t := &SaveLocalState{
 		TreeNodeInstance: n,
 		Url:              "",
 		Phase:            NilPhase,
@@ -95,8 +96,8 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 }
 
 // Start sends the Announce-message to all children
-func (p *SaveMessage) Start() error {
-	log.Lvl3("Starting SaveMessage")
+func (p *SaveLocalState) Start() error {
+	log.Lvl3("Starting SaveLocalState")
 	p.Phase = Consensus
 	masterTree, masterHash, err := p.GetLocalData()
 	if err != nil {
@@ -105,6 +106,7 @@ func (p *SaveMessage) Start() error {
 	}
 	p.MasterTree = masterTree
 	p.MasterHash = masterHash
+	p.BloomFilter = NewOptimalBloomFilter(1)
 	explicitTree := convertToExplicitTree(p.MasterTree)
 	p.LocSeen = getSeenFromExplicitTree(explicitTree)
 	sig, sErr := createLocalSig(p, explicitTree)
@@ -120,7 +122,9 @@ func (p *SaveMessage) Start() error {
 			Phase:         Consensus,
 			MasterTree:    explicitTree,
 			MasterTreeSig: sig,
-			MasterHash:    p.MasterHash},
+			MasterHash:    p.MasterHash,
+			BloomFilter:   p.BloomFilter,
+		},
 	})
 }
 
@@ -130,7 +134,7 @@ func (p *SaveMessage) Start() error {
 // Note: this function must be read as multiple functions with a common begining
 // and end but each time a different 'case'. Each one can be considered as an
 // independant function.
-func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
+func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 	log.Lvl4("Handling", p)
 	log.Lvl4("And the message", msg)
 	p.Phase = msg.SaveAnnounce.Phase
@@ -153,6 +157,7 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 		p.MasterTree = convertToAnonTree(msg.SaveAnnounce.MasterTree)
 		p.MasterTreeSig = msg.SaveAnnounce.MasterTreeSig
 		p.MasterHash = msg.SaveAnnounce.MasterHash
+		p.BloomFilter = msg.SaveAnnounce.BloomFilter
 		if !p.IsLeaf() {
 			return p.SendToChildren(&msg.SaveAnnounce)
 		} else {
@@ -231,7 +236,7 @@ func (p *SaveMessage) HandleAnnounce(msg StructSaveAnnounce) error {
 // Note: this function must be read as multiple functions with a common begining
 // and end but each time a different 'case'. Each one can be considered as an
 // independant function.
-func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
+func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 	log.Lvl4("Handling Save Reply", p)
 	log.Lvl4("And the replies", reply)
 	switch p.Phase {
@@ -378,7 +383,7 @@ func (p *SaveMessage) HandleReply(reply []StructSaveReply) error {
 // or a signed hash.
 // If the returned *AnonNode tree is not nil, then the map is. Else, it is the other way around.
 // If both returned value are nil, then an error occured.
-func (p *SaveMessage) GetLocalData() (*AnonNode, map[string]map[kyber.Point][]byte, error) {
+func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][]byte, error) {
 	// get data
 	resp, realUrl, _, err := getRemoteData(p.Url)
 	if err != nil {
@@ -458,7 +463,7 @@ func pruneHtmlTree(tree *html.Node) *html.Node {
 
 // htmlToAnonTree turn an tree composed of *html.Node to the corresponding tree
 // composed of *AnonNode
-func htmlToAnonTree(p *SaveMessage, root *html.Node) *AnonNode {
+func htmlToAnonTree(p *SaveLocalState, root *html.Node) *AnonNode {
 	var queue []*html.Node
 	var curr *html.Node
 	discovered := make(map[*html.Node]*AnonNode)
@@ -480,11 +485,11 @@ func htmlToAnonTree(p *SaveMessage, root *html.Node) *AnonNode {
 	return discovered[root]
 }
 
-// htmlToAnonNode take a SaveMessage p and a pointer to html node hn as input
+// htmlToAnonNode take a SaveLocalState p and a pointer to html node hn as input
 // and output the *AnonNode corresponding to hn.
-// The SaveMessage is used in the signing process of the *AnonNode and to store
+// The SaveLocalState is used in the signing process of the *AnonNode and to store
 // the node locally as plaintext.
-func htmlToAnonNode(p *SaveMessage, hn *html.Node) *AnonNode {
+func htmlToAnonNode(p *SaveLocalState, hn *html.Node) *AnonNode {
 	var anonNode *AnonNode = &AnonNode{}
 	hashedData := hashHtmlData(p, hn)
 	anonNode.HashedData = hashedData
@@ -500,7 +505,7 @@ func htmlToAnonNode(p *SaveMessage, hn *html.Node) *AnonNode {
 // The "data fields" are all the attributes of an html Nodes except the ones
 // related to its position in the html tree. Furthermore, the list hn.Attr is
 // sorted before the hashing process.
-func hashHtmlData(p *SaveMessage, hn *html.Node) string {
+func hashHtmlData(p *SaveLocalState, hn *html.Node) string {
 	if hn == nil {
 		return ""
 	}
@@ -532,7 +537,7 @@ func getSeenFromExplicitTree(et []ExplicitNode) []bool {
 // partial tree seen by the conode. The masterTree is the reference tree.
 // It also involves p.LocSeen as seen. It is an array where seen[i] = true iff
 // masterTree[i] has been seen locally by the conode.
-func createLocalSig(p *SaveMessage, masterTree []ExplicitNode) ([]byte, error) {
+func createLocalSig(p *SaveLocalState, masterTree []ExplicitNode) ([]byte, error) {
 	seen := p.LocSeen
 	if len(masterTree) != len(seen) {
 		return nil, errors.New("createLocalSig - not all nodes were tagged")
@@ -553,7 +558,7 @@ func createLocalSig(p *SaveMessage, masterTree []ExplicitNode) ([]byte, error) {
 // else, seen[i] = false.
 // It creates a hash of the tree represented as a byte array of the hashed data
 // followed by the index of the children if the node is seen or a 0 if not.
-func getExplicitSeenHash(p *SaveMessage, en []ExplicitNode, seen []bool) ([]byte, error) {
+func getExplicitSeenHash(p *SaveLocalState, en []ExplicitNode, seen []bool) ([]byte, error) {
 	if len(en) != len(seen) {
 		return nil, errors.New("createLocalSig - not all nodes were tagged")
 	}
@@ -577,7 +582,7 @@ func getExplicitSeenHash(p *SaveMessage, en []ExplicitNode, seen []bool) ([]byte
 // master tree defined by its root masterRoot. It adds the signature of the
 // conode server on all the nodes of the master tree that can be associated
 // with a node of the slave tree.
-func setLocalSeenAndSign(p *SaveMessage, slaveRoot *AnonNode, masterRoot *AnonNode) error {
+func setLocalSeenAndSign(p *SaveLocalState, slaveRoot *AnonNode, masterRoot *AnonNode) error {
 	// compare salveTree and masterTree and mark the master
 	unseenWholeTree(masterRoot)
 	masterPaths := masterRoot.ListPaths()
@@ -665,9 +670,9 @@ func unseenWholeTree(root *AnonNode) {
 }
 
 // AggregateErrors put all the errors contained in the children reply inside
-// the SaveMessage p field p.Errs. It allows the current protocol to transmit
+// the SaveLocalState p field p.Errs. It allows the current protocol to transmit
 // the errors from its children to its parent.
-func (p *SaveMessage) AggregateErrors(reply []StructSaveReply) {
+func (p *SaveLocalState) AggregateErrors(reply []StructSaveReply) {
 	for _, r := range reply {
 		p.Errs = append(p.Errs, r.Errs...)
 	}
@@ -677,7 +682,7 @@ func (p *SaveMessage) AggregateErrors(reply []StructSaveReply) {
 // reply the replies of the node's children. It add the localTree signatures and
 // the children's tree signatures inside the master tree that will be send to
 // the node's parent.
-func (p *SaveMessage) AggregateStructData(locTree *AnonNode, reply []StructSaveReply) {
+func (p *SaveLocalState) AggregateStructData(locTree *AnonNode, reply []StructSaveReply) {
 	if p.MasterTree != nil {
 		// create local result
 		masterRoot := p.MasterTree
@@ -704,7 +709,7 @@ func (p *SaveMessage) AggregateStructData(locTree *AnonNode, reply []StructSaveR
 // AggregateUnstructData take locHash, the hash of the data signed by the current
 // node and reply the replies of the node's children. It verifies and signs the
 // p.MasterHash with the signatures of both the nodes and its chidren.
-func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[kyber.Point][]byte, reply []StructSaveReply) {
+func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Point][]byte, reply []StructSaveReply) {
 	if p.MasterHash != nil && len(p.MasterHash) > 0 {
 		for img, sigmap := range locHash {
 			for srv, sig := range sigmap {
@@ -749,7 +754,7 @@ func (p *SaveMessage) AggregateUnstructData(locHash map[string]map[kyber.Point][
 //     - the couple (seen,signature) for each of p.SeenMap, p.SennSig
 // and return a seen map and a signature map that contains only valid signatures
 // also, an error is returned if the signature of the masterTree is invalid.
-func getValidOnlySeenSig(p *SaveMessage) (map[kyber.Point][]bool, map[kyber.Point][]byte, error) {
+func getValidOnlySeenSig(p *SaveLocalState) (map[kyber.Point][]bool, map[kyber.Point][]byte, error) {
 	// verify mastertree signature
 	masterExplicit := convertToExplicitTree(p.MasterTree)
 	allSeen := make([]bool, len(masterExplicit))
@@ -811,7 +816,7 @@ func getValidOnlySeenSig(p *SaveMessage) (map[kyber.Point][]bool, map[kyber.Poin
 //
 // Note : This function is highly linked with the setLocalSeenAndSign function
 // a change in the latter probably means a change in this one.
-func createConsensusTree(p *SaveMessage, validSeen map[kyber.Point][]bool) (*AnonNode, error) {
+func createConsensusTree(p *SaveLocalState, validSeen map[kyber.Point][]bool) (*AnonNode, error) {
 	unseenWholeTree(p.MasterTree)
 	explicitMaster := convertToExplicitTree(p.MasterTree)
 	aggregateSeen := make([]int, len(explicitMaster))
@@ -853,7 +858,7 @@ func createConsensusTree(p *SaveMessage, validSeen map[kyber.Point][]bool) (*Ano
 //
 // Warning: the signatures verification must be done BEFORE using this function.
 // No signatures verification are done here.
-func getMostSignedHash(p *SaveMessage, hashmap map[string]map[kyber.Point][]byte) (map[string]map[kyber.Point][]byte, error) {
+func getMostSignedHash(p *SaveLocalState, hashmap map[string]map[kyber.Point][]byte) (map[string]map[kyber.Point][]byte, error) {
 	if hashmap == nil {
 		return nil, nil
 	}
@@ -880,7 +885,7 @@ func getMostSignedHash(p *SaveMessage, hashmap map[string]map[kyber.Point][]byte
 // phase. It outputs the hash of the data requested by the root.
 // A hash is produced only if the number of verified signature is higher than
 // the node threshold.
-func getRequestedMissingHash(p *SaveMessage) string {
+func getRequestedMissingHash(p *SaveLocalState) string {
 	var missingHash string
 	for dataH, sigs := range p.MasterHash {
 		if len(sigs) >= int(p.Threshold) {
@@ -908,7 +913,7 @@ func getRequestedMissingHash(p *SaveMessage) string {
 // BuildConsensusHtmlPage takes the p.MasterTree made of *AnonNode and combine
 // this data with the p.PlainNodes in order to create an *html.Node tree. From
 // there, it creates a valid html page and outputs it.
-func (p *SaveMessage) BuildConsensusHtmlPage() []byte {
+func (p *SaveLocalState) BuildConsensusHtmlPage() []byte {
 	log.Lvl4("Begin building consensus html page")
 	// convert ExplicitNodes Tree to *html.Nodes tree
 	explicitTree := convertToExplicitTree(p.MasterTree)

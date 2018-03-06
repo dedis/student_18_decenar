@@ -8,6 +8,7 @@ so that it can find out who sent the message.
 */
 
 import (
+	"github.com/tylertreat/BoomFilters"
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/kyber.v2"
@@ -39,12 +40,14 @@ const (
 //     Url : the url of the webpage the conodes will reach consensus on
 //     MasterTree : the tree representing structured data with its signatures
 //     MasterHash : the hash representing unstructured data with its signatures
+//     BloomFilter: the Bloom filter for the unique leaves of the MasterTree
 type SaveAnnounce struct {
 	Phase         SavePhase
 	Url           string
 	MasterTree    []ExplicitNode
 	MasterTreeSig []byte
 	MasterHash    map[string]map[kyber.Point][]byte
+	BloomFilter   BloomFilter
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
