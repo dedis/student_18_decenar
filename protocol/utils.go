@@ -1,9 +1,10 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"errors"
-
-	"github.com/tylertreat/BoomFilters"
+	"hash/fnv"
+	"math"
 )
 
 /*
@@ -331,11 +332,109 @@ func convertToExplicitTree(root *AnonNode) []ExplicitNode {
 	return explicitTree
 }
 
-type BloomFilter struct {
-	*boom.CountingBloomFilter
+// Counting Bloom Filter
+// The code is based on the Bloom filter library by Will Fitzgerald:
+// https://github.com/willf/bloom
+type CBF struct {
+	set []byte // the counting Bloom filter byte set
+	m   uint   // maximal number of buckets
+	k   uint   // number of hash functions
 }
 
-func NewOptimalBloomFilter(nLeaves int) *BloomFilter {
-	return &BloomFilter{boom.NewCountingBloomFilter(uint(nLeaves), 8, 0.001)}
+func NewOptimalBloomFilter(root *AnonNode) *CBF {
+	// Bloom filter is used only for HTML data
+	if root == nil {
+		return &CBF{}
+	}
+	uniqueLeaves := uint(len(root.ListUniqueDataLeaves()))
+	m, k := bestParameters(uniqueLeaves, 0.001)
+	return &CBF{set: make([]byte, m), m: m, k: k}
+}
 
+// AddUniqueLeaves add to c the unique leaves contained
+// in the AnonTree with the given root
+func (c *CBF) AddUniqueLeaves(root *AnonNode) *CBF {
+	uniqueLeaves := root.ListUniqueDataLeaves()
+	for _, l := range uniqueLeaves {
+		c.Add([]byte(l))
+	}
+
+	return c
+}
+
+func NewFilledBloomFilter(root *AnonNode) *CBF {
+	return NewOptimalBloomFilter(root).AddUniqueLeaves(root)
+}
+
+// Add add an elements e to the counting Bloom Filter c
+func (c *CBF) Add(e []byte) *CBF {
+	h := hashes(e)
+	for i := uint(0); i < c.k; i++ {
+		c.set[c.location(h, i)]++
+	}
+
+	// return c to allow chaining
+	return c
+}
+
+// Count return an estimate of how many times elements e
+// has been added to the set
+func (c *CBF) Count(e []byte) byte {
+	min := byte(255)
+	h := hashes(e)
+	for i := uint(0); i < c.k; i++ {
+		counter := c.set[c.location(h, i)]
+		if counter < min {
+			min = counter
+		}
+	}
+
+	return min
+}
+
+// Merge merges two counting Bloom Filters
+func (c *CBF) Merge(cbf *CBF) {
+	for i, counter := range cbf.set {
+		c.set[i] += counter
+	}
+}
+
+func (c *CBF) GetSet() []byte {
+	return c.set
+}
+
+// hashes returns the four hash of e that are used to create
+// the k hash values
+func hashes(e []byte) [4]uint64 {
+	cst := []byte("constant")
+	hasher := fnv.New128()
+	hasher.Write(e)
+	sum := hasher.Sum(nil)
+	h1 := binary.BigEndian.Uint64(sum[0:])
+	h2 := binary.BigEndian.Uint64(sum[8:])
+	hasher.Write(cst)
+	sum = hasher.Sum(nil)
+	h3 := binary.BigEndian.Uint64(sum[0:])
+	h4 := binary.BigEndian.Uint64(sum[8:])
+	return [4]uint64{h1, h2, h3, h4}
+}
+
+// location returns the ith hashed location using the four base hash values
+func location(h [4]uint64, i uint) uint64 {
+	ii := uint64(i)
+	return h[ii%2] + ii*h[2+(((ii+(ii%2))%4)/2)]
+}
+
+// location returns the ith hashed location using the four base hash values
+func (c *CBF) location(h [4]uint64, i uint) uint {
+	return uint(location(h, i) % uint64(c.m))
+}
+
+// bestParameters return an estimate of m and k given the number of elements n
+// that should be inserted in the set and fpRate, the desired false positive rate
+func bestParameters(n uint, fpRate float64) (uint, uint) {
+	m := uint(math.Ceil(-1 * float64(n) * math.Log(fpRate) / math.Pow(math.Log(2), 2)))
+	k := uint(math.Ceil(math.Log(2) * float64(m) / float64(n)))
+
+	return m, k
 }

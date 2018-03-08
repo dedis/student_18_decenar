@@ -23,7 +23,6 @@ import (
 	"net/http"
 	urlpkg "net/url"
 
-	boom "github.com/tylertreat/BoomFilters"
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/kyber.v2"
@@ -55,12 +54,13 @@ type SaveLocalState struct {
 	LocSig        []byte
 	SeenMap       map[string][]bool
 	SeenSig       map[string][]byte
-	BloomFilter   *BloomFilter
 
 	MasterHash map[string]map[kyber.Point][]byte
 
 	PlainNodes map[string]html.Node
 	PlainData  map[string][]byte
+
+	CBF *CBF
 
 	MsgToSign  chan []byte
 	StringChan chan string
@@ -68,6 +68,8 @@ type SaveLocalState struct {
 	RefTreeChan chan []ExplicitNode
 	SeenMapChan chan map[string][]byte
 	SeenSigChan chan map[string][]byte
+
+	CBFChan chan *CBF
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -86,6 +88,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		RefTreeChan:      make(chan []ExplicitNode),
 		SeenMapChan:      make(chan map[string][]byte),
 		SeenSigChan:      make(chan map[string][]byte),
+		CBFChan:          make(chan *CBF),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -106,7 +109,6 @@ func (p *SaveLocalState) Start() error {
 	}
 	p.MasterTree = masterTree
 	p.MasterHash = masterHash
-	p.BloomFilter = NewOptimalBloomFilter(1)
 	explicitTree := convertToExplicitTree(p.MasterTree)
 	p.LocSeen = getSeenFromExplicitTree(explicitTree)
 	sig, sErr := createLocalSig(p, explicitTree)
@@ -123,13 +125,11 @@ func (p *SaveLocalState) Start() error {
 			MasterTree:    explicitTree,
 			MasterTreeSig: sig,
 			MasterHash:    p.MasterHash,
-			BloomFilter:   p.BloomFilter,
 		},
 	})
 }
 
-// HandleAnnounce is the first message and is used to send an ID that
-// is stored in all nodes.
+// HandleAnnounce is the message going down the tree
 //
 // Note: this function must be read as multiple functions with a common begining
 // and end but each time a different 'case'. Each one can be considered as an
@@ -157,7 +157,6 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		p.MasterTree = convertToAnonTree(msg.SaveAnnounce.MasterTree)
 		p.MasterTreeSig = msg.SaveAnnounce.MasterTreeSig
 		p.MasterHash = msg.SaveAnnounce.MasterHash
-		p.BloomFilter = msg.SaveAnnounce.BloomFilter
 		if !p.IsLeaf() {
 			return p.SendToChildren(&msg.SaveAnnounce)
 		} else {
@@ -230,8 +229,7 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 	return nil
 }
 
-// HandleReply is the message going up the tree and holding a counter
-// to verify the number of nodes.
+// HandleReply is the message going up is the message going up the tree
 //
 // Note: this function must be read as multiple functions with a common begining
 // and end but each time a different 'case'. Each one can be considered as an
@@ -253,6 +251,7 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 		}
 		p.AggregateStructData(locTree, reply)
 		p.AggregateUnstructData(locHash, reply)
+		p.AggregateCBF(locTree, reply)
 		if p.IsRoot() {
 			log.Lvl4("Consensus reach root. Passing to next phase")
 			// consensus on structured data
@@ -267,6 +266,8 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 					p.Errs = append(p.Errs, consErr)
 				}
 				consensusRoot = consRoot
+				// print out consensus Bloom filter
+				fmt.Printf("%#v\n", len(p.CBF.GetSet()))
 			}
 			// consensus on unstructured data
 			if p.MasterHash != nil && len(p.MasterHash) > 0 {
@@ -299,7 +300,10 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 
 				MasterHash: p.MasterHash,
 
-				Errs: p.Errs}
+				Errs: p.Errs,
+
+				CountingBloomFilter: *(p.CBF),
+			}
 			return p.SendTo(p.Parent(), &resp)
 		}
 	case RequestMissingData:
@@ -693,6 +697,7 @@ func (p *SaveLocalState) AggregateStructData(locTree *AnonNode, reply []StructSa
 		}
 		// aggregate children reply with local data (no signature verification)
 		for _, r := range reply {
+			fmt.Printf("Reply %#v\n", r)
 			for kp, seen := range seenmapByteToBool(r.SeenMap) {
 				p.SeenMap[kp] = seen
 			}
@@ -703,6 +708,20 @@ func (p *SaveLocalState) AggregateStructData(locTree *AnonNode, reply []StructSa
 		// add local result to aggregated result
 		p.SeenMap[p.Public().String()] = p.LocSeen
 		p.SeenSig[p.Public().String()] = p.LocSig
+	}
+}
+
+func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply) {
+	// This method is only for structured data
+	if p.MasterTree != nil {
+		p.CBF = NewFilledBloomFilter(locTree)
+		fmt.Printf("%#v\n", p.CBF)
+		if !p.IsLeaf() {
+			// aggregate all the children's reply
+			for _, r := range reply {
+				p.CBF.Merge(&(r.CountingBloomFilter))
+			}
+		}
 	}
 }
 

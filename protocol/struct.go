@@ -8,7 +8,6 @@ so that it can find out who sent the message.
 */
 
 import (
-	"github.com/tylertreat/BoomFilters"
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/kyber.v2"
@@ -47,7 +46,6 @@ type SaveAnnounce struct {
 	MasterTree    []ExplicitNode
 	MasterTreeSig []byte
 	MasterHash    map[string]map[kyber.Point][]byte
-	BloomFilter   BloomFilter
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -89,6 +87,8 @@ type SaveReply struct {
 
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte
+
+	CountingBloomFilter CBF
 }
 
 // StructSaveReply just contains StructSaveReply and the data necessary to
