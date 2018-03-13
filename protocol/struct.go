@@ -39,13 +39,15 @@ const (
 //     Url : the url of the webpage the conodes will reach consensus on
 //     MasterTree : the tree representing structured data with its signatures
 //     MasterHash : the hash representing unstructured data with its signatures
-//     BloomFilter: the Bloom filter for the unique leaves of the MasterTree
+// TODO: adapt doc
 type SaveAnnounce struct {
 	Phase         SavePhase
 	Url           string
 	MasterTree    []ExplicitNode
 	MasterTreeSig []byte
 	MasterHash    map[string]map[kyber.Point][]byte
+	ParametersCBF []uint64
+	RandomCBFs    map[string][]byte
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -78,7 +80,7 @@ type SaveReply struct {
 	Phase         SavePhase
 	Url           string
 	Errs          []error
-	MasterTree    []ExplicitNode //*AnonNode
+	MasterTree    []ExplicitNode
 	MasterTreeSig []byte
 	MasterHash    map[string]map[kyber.Point][]byte
 
@@ -88,7 +90,7 @@ type SaveReply struct {
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte
 
-	CountingBloomFilter CBF
+	CBFSet []byte
 }
 
 // StructSaveReply just contains StructSaveReply and the data necessary to

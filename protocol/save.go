@@ -16,18 +16,19 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
+	"net/http"
+	urlpkg "net/url"
 	"regexp"
 	"sort"
 	"strings"
 
-	"net/http"
-	urlpkg "net/url"
-
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/kyber.v2"
-
 	"gopkg.in/dedis/kyber.v2/sign/schnorr"
+	"gopkg.in/dedis/kyber.v2/util/random"
+
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
 	"gopkg.in/dedis/onet.v2/network"
@@ -60,7 +61,9 @@ type SaveLocalState struct {
 	PlainNodes map[string]html.Node
 	PlainData  map[string][]byte
 
-	CBF *CBF
+	ParametersCBF       []uint
+	RandomEncryptedCBF  []byte
+	CountingBloomFilter *CBF
 
 	MsgToSign  chan []byte
 	StringChan chan string
@@ -68,8 +71,6 @@ type SaveLocalState struct {
 	RefTreeChan chan []ExplicitNode
 	SeenMapChan chan map[string][]byte
 	SeenSigChan chan map[string][]byte
-
-	CBFChan chan *CBF
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -88,7 +89,6 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		RefTreeChan:      make(chan []ExplicitNode),
 		SeenMapChan:      make(chan map[string][]byte),
 		SeenSigChan:      make(chan map[string][]byte),
-		CBFChan:          make(chan *CBF),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -98,7 +98,8 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	return t, nil
 }
 
-// Start sends the Announce-message to all children
+// Start sends the Announce-message to all children. This function is executed only
+// by the leader, i.e. root, of the tree
 func (p *SaveLocalState) Start() error {
 	log.Lvl3("Starting SaveLocalState")
 	p.Phase = Consensus
@@ -115,6 +116,16 @@ func (p *SaveLocalState) Start() error {
 	if sErr != nil {
 		log.Fatal("Error in save protocol Start():", sErr)
 	}
+	paramCBF := GetOptimalCBFParametersToSend(masterTree)
+	var randomCBFs map[string][]byte
+	if masterTree != nil {
+		// TODO: mybe not in the if, verify how to deal with AD
+		randomCBFs, err = p.generateRandomCBF([]uint{uint(paramCBF[0]), uint(paramCBF[1])})
+		if err != nil {
+			log.Error("Error in save protocol Start():", err)
+			return err
+		}
+	}
 	log.Lvl4("Send Explicit Tree to service")
 	p.RefTreeChan <- explicitTree
 	return p.HandleAnnounce(StructSaveAnnounce{
@@ -125,6 +136,8 @@ func (p *SaveLocalState) Start() error {
 			MasterTree:    explicitTree,
 			MasterTreeSig: sig,
 			MasterHash:    p.MasterHash,
+			ParametersCBF: paramCBF,
+			RandomCBFs:    randomCBFs,
 		},
 	})
 }
@@ -157,6 +170,10 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		p.MasterTree = convertToAnonTree(msg.SaveAnnounce.MasterTree)
 		p.MasterTreeSig = msg.SaveAnnounce.MasterTreeSig
 		p.MasterHash = msg.SaveAnnounce.MasterHash
+		p.ParametersCBF = []uint{uint(msg.SaveAnnounce.ParametersCBF[0]), uint(msg.SaveAnnounce.ParametersCBF[1])}
+		// take the random and encrypted CBF of this node. It is not needed
+		// to take all the encrypted vectors
+		p.RandomEncryptedCBF = msg.SaveAnnounce.RandomCBFs[p.Public().String()]
 		if !p.IsLeaf() {
 			return p.SendToChildren(&msg.SaveAnnounce)
 		} else {
@@ -229,7 +246,7 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 	return nil
 }
 
-// HandleReply is the message going up is the message going up the tree
+// HandleReply is the message going up the tree
 //
 // Note: this function must be read as multiple functions with a common begining
 // and end but each time a different 'case'. Each one can be considered as an
@@ -249,9 +266,9 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 			log.Lvl1("Error! Impossible to get local data", locErr)
 			p.Errs = append(p.Errs, locErr)
 		}
+		p.AggregateCBF(locTree, reply)
 		p.AggregateStructData(locTree, reply)
 		p.AggregateUnstructData(locHash, reply)
-		p.AggregateCBF(locTree, reply)
 		if p.IsRoot() {
 			log.Lvl4("Consensus reach root. Passing to next phase")
 			// consensus on structured data
@@ -266,8 +283,7 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 					p.Errs = append(p.Errs, consErr)
 				}
 				consensusRoot = consRoot
-				// print out consensus Bloom filter
-				fmt.Printf("%#v\n", len(p.CBF.GetSet()))
+				p.VerifyCBFConsensus(p.CountingBloomFilter, consRoot)
 			}
 			// consensus on unstructured data
 			if p.MasterHash != nil && len(p.MasterHash) > 0 {
@@ -302,7 +318,10 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 
 				Errs: p.Errs,
 
-				CountingBloomFilter: *(p.CBF),
+				CBFSet: p.CountingBloomFilter.GetSet(),
+			}
+			if resp.CBFSet == nil {
+				resp.CBFSet = []byte("")
 			}
 			return p.SendTo(p.Parent(), &resp)
 		}
@@ -383,6 +402,31 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 	return nil
 }
 
+func (p *SaveLocalState) VerifyCBFConsensus(cbf *CBF, consensusRoot *AnonNode) {
+	threshold := byte(2)
+	locTree, _, _ := p.GetLocalData()
+	leaves := locTree.ListUniqueDataLeaves()
+	keepLeaves := []string{}
+	for _, l := range leaves {
+		if cbf.Count([]byte(l))-byte(24) >= threshold {
+			keepLeaves = append(keepLeaves, l)
+		}
+	}
+
+	// get leaves of original consensu tree
+	oldLeaves := consensusRoot.ListUniqueDataLeaves()
+	fmt.Printf("New leaves: %#v\n", keepLeaves)
+	fmt.Printf("Old leaves: %#v\n", oldLeaves)
+	equal := true
+	for i := range keepLeaves {
+		if keepLeaves[i] != oldLeaves[i] {
+			equal = false
+		}
+	}
+	fmt.Printf("Are results equal? %v\n", equal)
+
+}
+
 // GetLocalData retrieve the data from the p.Url and handle it to make it either a AnonNodes tree
 // or a signed hash.
 // If the returned *AnonNode tree is not nil, then the map is. Else, it is the other way around.
@@ -399,7 +443,8 @@ func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][
 	// apply procedure according to data type
 	contentTypes := resp.Header.Get(http.CanonicalHeaderKey("Content-Type"))
 	p.ContentType = contentTypes
-	if b, e := regexp.MatchString("text/html", contentTypes); b && e == nil {
+	// TODO: is 200 enough?
+	if b, e := regexp.MatchString("text/html", contentTypes); b && e == nil && resp.StatusCode == 200 {
 		// procedure for html files (tree-consensus)
 		htmlTree, htmlErr := html.Parse(resp.Body)
 		if htmlErr != nil {
@@ -697,7 +742,6 @@ func (p *SaveLocalState) AggregateStructData(locTree *AnonNode, reply []StructSa
 		}
 		// aggregate children reply with local data (no signature verification)
 		for _, r := range reply {
-			fmt.Printf("Reply %#v\n", r)
 			for kp, seen := range seenmapByteToBool(r.SeenMap) {
 				p.SeenMap[kp] = seen
 			}
@@ -711,18 +755,35 @@ func (p *SaveLocalState) AggregateStructData(locTree *AnonNode, reply []StructSa
 	}
 }
 
-func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply) {
+func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply) error {
 	// This method is only for structured data
 	if p.MasterTree != nil {
-		p.CBF = NewFilledBloomFilter(locTree)
-		fmt.Printf("%#v\n", p.CBF)
+		param := p.ParametersCBF
+		// fill filter with local data
+		p.CountingBloomFilter = NewFilledBloomFilter(param, locTree)
+		var randomCBF *CBF
+		var err error
+		if !p.IsRoot() {
+			// decrypt random vector, where the public key is the root public key
+			randomCBF, err = Decrypt(p.Suite(), p.Private(), p.Root().ServerIdentity.Public, p.RandomEncryptedCBF, param)
+			if err != nil {
+				return err
+			}
+		} else {
+			randomCBF = &CBF{Set: p.RandomEncryptedCBF, M: param[0], K: param[1]}
+		}
+		// merge random CBF with local CBF
+		p.CountingBloomFilter.Merge(randomCBF)
+
 		if !p.IsLeaf() {
 			// aggregate all the children's reply
 			for _, r := range reply {
-				p.CBF.Merge(&(r.CountingBloomFilter))
+				p.CountingBloomFilter.MergeSet(r.CBFSet)
 			}
 		}
 	}
+
+	return nil
 }
 
 // AggregateUnstructData take locHash, the hash of the data signed by the current
@@ -765,6 +826,70 @@ func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Poin
 			}
 		}
 	}
+}
+
+// generateRandomCBF generates random and encrypted CBFs for all the conodes, except root.
+// For root, we generate a CBF such that all the "columns" of all the random CBFs, so
+// the CBFs of the conodes and the CBF of the root, sum up to newZero. Note that only
+// root can executed this function (we insert an if/else condition to enforce this)
+func (p *SaveLocalState) generateRandomCBF(param []uint) (map[string][]byte, error) {
+	if p.IsRoot() {
+		// allocate maps
+		randomCBFs := make(map[string]*CBF)
+		randomEncryptedCBFs := make(map[string][]byte)
+
+		// define constants
+		bitLen := uint(3) // TODO maybe use a constant?
+		conodes := len(p.Roster().List)
+		newZero := byte(conodes*(int(math.Pow(float64(2), float64(bitLen)))-1) + conodes)
+
+		// create a random and encrypted CBF for all the conodes except for root
+		for _, kp := range (p.Roster()).Publics() {
+			// we are sure that the root is executing this function
+			if kp.Equal(p.TreeNode().ServerIdentity.Public) {
+				continue
+			}
+			// generate random counting Bloom filter
+			randomCBF := NewBloomFilter(param)
+			for i := range randomCBF.GetSet() {
+				randomCBF.SetByte(uint(i), random.Bits(3, false, p.Suite().RandomStream())[0])
+			}
+			randomCBFs[kp.String()] = randomCBF
+
+			// encrypt the CBF using DH to seed AES
+			cipherText, err := randomCBF.Encrypt(p.Suite(), p.Private(), kp)
+			if err != nil {
+				return nil, err
+			}
+
+			// encode the ciphertext and add to the map
+			encodedCipherText := &bytes.Buffer{}
+			e := base64.NewEncoder(base64.StdEncoding, encodedCipherText)
+			defer e.Close()
+			e.Write(cipherText)
+			randomEncryptedCBFs[kp.String()] = encodedCipherText.Bytes()
+		}
+
+		// now create the CBF for the root of the tree, by making all the "columns" of
+		// all the random CBFs summing up to newZero.
+		// Note that param[0] = m, the number of buckets in the CBF
+		rootCBF := NewBloomFilter(param)
+		for i := uint(0); i < param[0]; i++ {
+			var sum byte
+			for _, cbf := range randomCBFs {
+				sum += cbf.GetByte(i)
+			}
+			val := newZero - sum
+			rootCBF.SetByte(i, val)
+		}
+		randomCBFs[p.TreeNode().ServerIdentity.Public.String()] = rootCBF
+		// return the root vector in the randomEncryptedCBFs map, even if it's not encrypted
+		randomEncryptedCBFs[p.TreeNode().ServerIdentity.Public.String()] = rootCBF.GetSet()
+
+		return randomEncryptedCBFs, nil
+	}
+
+	return nil, errors.New("Only root should generate the random encrypted counting Bloom filters")
 }
 
 // getValidOnlySeenSig verifies all the signatures involved in the consensus

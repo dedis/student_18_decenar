@@ -1,10 +1,19 @@
 package protocol
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"hash/fnv"
+	"io/ioutil"
 	"math"
+
+	"gopkg.in/dedis/kyber.v2"
+	"gopkg.in/dedis/kyber.v2/util/random"
+	"gopkg.in/dedis/onet.v2/network"
 )
 
 /*
@@ -336,9 +345,13 @@ func convertToExplicitTree(root *AnonNode) []ExplicitNode {
 // The code is based on the Bloom filter library by Will Fitzgerald:
 // https://github.com/willf/bloom
 type CBF struct {
-	set []byte // the counting Bloom filter byte set
-	m   uint   // maximal number of buckets
-	k   uint   // number of hash functions
+	Set []byte // the counting Bloom filter byte set
+	M   uint   // maximal number of buckets
+	K   uint   // number of hash functions
+}
+
+func NewBloomFilter(param []uint) *CBF {
+	return &CBF{Set: make([]byte, param[0]), M: param[0], K: param[1]}
 }
 
 func NewOptimalBloomFilter(root *AnonNode) *CBF {
@@ -346,9 +359,23 @@ func NewOptimalBloomFilter(root *AnonNode) *CBF {
 	if root == nil {
 		return &CBF{}
 	}
+	p := GetOptimalCBFParameters(root)
+	return NewBloomFilter(p)
+}
+
+func GetOptimalCBFParametersToSend(root *AnonNode) []uint64 {
+	param := GetOptimalCBFParameters(root)
+	return []uint64{uint64(param[0]), uint64(param[1])}
+}
+
+func GetOptimalCBFParameters(root *AnonNode) []uint {
+	if root == nil {
+		return []uint{0, 0}
+	}
 	uniqueLeaves := uint(len(root.ListUniqueDataLeaves()))
 	m, k := bestParameters(uniqueLeaves, 0.001)
-	return &CBF{set: make([]byte, m), m: m, k: k}
+
+	return []uint{m, k}
 }
 
 // AddUniqueLeaves add to c the unique leaves contained
@@ -362,15 +389,68 @@ func (c *CBF) AddUniqueLeaves(root *AnonNode) *CBF {
 	return c
 }
 
-func NewFilledBloomFilter(root *AnonNode) *CBF {
-	return NewOptimalBloomFilter(root).AddUniqueLeaves(root)
+func NewFilledBloomFilter(param []uint, root *AnonNode) *CBF {
+	return NewBloomFilter(param).AddUniqueLeaves(root)
+}
+
+func (c *CBF) Encrypt(s network.Suite, private kyber.Scalar, public kyber.Point) ([]byte, error) {
+	// encrypt filter using a DH shared secret to seed AES
+	plainText := c.GetSet()
+	sharedSecret := s.Point().Mul(private, public)
+	byteSharedSecret, err := sharedSecret.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(byteSharedSecret)
+	if err != nil {
+		return nil, err
+	}
+	//IV needs to be unique, but doesn't have to be secure.
+	//It's common to put it at the beginning of the ciphertext.
+	cipherText := make([]byte, aes.BlockSize+len(plainText))
+	iv := cipherText[:aes.BlockSize]
+	random.Bytes(iv, s.RandomStream())
+
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(cipherText[aes.BlockSize:], plainText)
+
+	return cipherText, nil
+}
+
+func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedCipherText []byte, parameters []uint) (*CBF, error) {
+	sharedSecret := s.Point().Mul(private, public)
+	byteSharedSecret, err := sharedSecret.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(byteSharedSecret)
+	if err != nil {
+		return nil, err
+	}
+
+	// decode cipher text encoded in base64
+	d := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(encodedCipherText))
+	cipherTextAndIV, err := ioutil.ReadAll(d)
+	if err != nil {
+		return nil, err
+	}
+
+	// get IV
+	iv := cipherTextAndIV[:aes.BlockSize]
+	cipherText := cipherTextAndIV[aes.BlockSize:]
+
+	// decrypt
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(cipherText, cipherText)
+
+	return &CBF{Set: cipherText, M: parameters[0], K: parameters[1]}, nil
 }
 
 // Add add an elements e to the counting Bloom Filter c
 func (c *CBF) Add(e []byte) *CBF {
 	h := hashes(e)
-	for i := uint(0); i < c.k; i++ {
-		c.set[c.location(h, i)]++
+	for i := uint(0); i < c.K; i++ {
+		c.Set[c.location(h, i)]++
 	}
 
 	// return c to allow chaining
@@ -382,8 +462,8 @@ func (c *CBF) Add(e []byte) *CBF {
 func (c *CBF) Count(e []byte) byte {
 	min := byte(255)
 	h := hashes(e)
-	for i := uint(0); i < c.k; i++ {
-		counter := c.set[c.location(h, i)]
+	for i := uint(0); i < c.K; i++ {
+		counter := c.Set[c.location(h, i)]
 		if counter < min {
 			min = counter
 		}
@@ -394,13 +474,30 @@ func (c *CBF) Count(e []byte) byte {
 
 // Merge merges two counting Bloom Filters
 func (c *CBF) Merge(cbf *CBF) {
-	for i, counter := range cbf.set {
-		c.set[i] += counter
+	for i, counter := range cbf.Set {
+		c.Set[i] += counter
+	}
+}
+
+func (c *CBF) MergeSet(set []byte) {
+	for i, counter := range set {
+		c.Set[i] += counter
 	}
 }
 
 func (c *CBF) GetSet() []byte {
-	return c.set
+	if c == nil {
+		return nil
+	}
+	return c.Set
+}
+
+func (c *CBF) SetByte(i uint, value byte) {
+	c.Set[i] = value
+}
+
+func (c *CBF) GetByte(i uint) byte {
+	return c.Set[i]
 }
 
 // hashes returns the four hash of e that are used to create
@@ -427,7 +524,7 @@ func location(h [4]uint64, i uint) uint64 {
 
 // location returns the ith hashed location using the four base hash values
 func (c *CBF) location(h [4]uint64, i uint) uint {
-	return uint(location(h, i) % uint64(c.m))
+	return uint(location(h, i) % uint64(c.M))
 }
 
 // bestParameters return an estimate of m and k given the number of elements n
