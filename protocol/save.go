@@ -120,7 +120,7 @@ func (p *SaveLocalState) Start() error {
 	var randomCBFs map[string][]byte
 	if masterTree != nil {
 		// TODO: mybe not in the if, verify how to deal with AD
-		randomCBFs, err = p.generateRandomCBF([]uint{uint(paramCBF[0]), uint(paramCBF[1])})
+		randomCBFs, err = p.generateRandomCBF(paramCBF)
 		if err != nil {
 			log.Error("Error in save protocol Start():", err)
 			return err
@@ -131,13 +131,13 @@ func (p *SaveLocalState) Start() error {
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
 		SaveAnnounce{
-			Url:           p.Url,
-			Phase:         Consensus,
-			MasterTree:    explicitTree,
-			MasterTreeSig: sig,
-			MasterHash:    p.MasterHash,
-			ParametersCBF: paramCBF,
-			RandomCBFs:    randomCBFs,
+			Url:                 p.Url,
+			Phase:               Consensus,
+			MasterTree:          explicitTree,
+			MasterTreeSig:       sig,
+			MasterHash:          p.MasterHash,
+			ParametersCBF:       paramCBF,
+			RandomEncryptedCBFs: randomCBFs,
 		},
 	})
 }
@@ -170,10 +170,11 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		p.MasterTree = convertToAnonTree(msg.SaveAnnounce.MasterTree)
 		p.MasterTreeSig = msg.SaveAnnounce.MasterTreeSig
 		p.MasterHash = msg.SaveAnnounce.MasterHash
+		// get the CBF's parameters computed by the root
+		// TODO maybe to a function here
 		p.ParametersCBF = []uint{uint(msg.SaveAnnounce.ParametersCBF[0]), uint(msg.SaveAnnounce.ParametersCBF[1])}
-		// take the random and encrypted CBF of this node. It is not needed
-		// to take all the encrypted vectors
-		p.RandomEncryptedCBF = msg.SaveAnnounce.RandomCBFs[p.Public().String()]
+		// take the random and encrypted CBF of this node
+		p.RandomEncryptedCBF = msg.SaveAnnounce.RandomEncryptedCBFs[p.Public().String()]
 		if !p.IsLeaf() {
 			return p.SendToChildren(&msg.SaveAnnounce)
 		} else {
@@ -266,9 +267,13 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 			log.Lvl1("Error! Impossible to get local data", locErr)
 			p.Errs = append(p.Errs, locErr)
 		}
-		p.AggregateCBF(locTree, reply)
 		p.AggregateStructData(locTree, reply)
 		p.AggregateUnstructData(locHash, reply)
+		p.AggregateCBF(locTree, reply)
+		CBFSetSig, err := p.signCBFSet()
+		if err != nil {
+			return err
+		}
 		if p.IsRoot() {
 			log.Lvl4("Consensus reach root. Passing to next phase")
 			// consensus on structured data
@@ -283,6 +288,7 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 					p.Errs = append(p.Errs, consErr)
 				}
 				consensusRoot = consRoot
+				// TODO: this should be changed somehow
 				p.VerifyCBFConsensus(p.CountingBloomFilter, consRoot)
 			}
 			// consensus on unstructured data
@@ -318,7 +324,8 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 
 				Errs: p.Errs,
 
-				CBFSet: p.CountingBloomFilter.GetSet(),
+				CBFSet:    p.CountingBloomFilter.GetSet(),
+				CBFSetSig: CBFSetSig,
 			}
 			if resp.CBFSet == nil {
 				resp.CBFSet = []byte("")
@@ -424,7 +431,6 @@ func (p *SaveLocalState) VerifyCBFConsensus(cbf *CBF, consensusRoot *AnonNode) {
 		}
 	}
 	fmt.Printf("Are results equal? %v\n", equal)
-
 }
 
 // GetLocalData retrieve the data from the p.Url and handle it to make it either a AnonNodes tree
@@ -443,7 +449,6 @@ func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][
 	// apply procedure according to data type
 	contentTypes := resp.Header.Get(http.CanonicalHeaderKey("Content-Type"))
 	p.ContentType = contentTypes
-	// TODO: is 200 enough?
 	if b, e := regexp.MatchString("text/html", contentTypes); b && e == nil && resp.StatusCode == 200 {
 		// procedure for html files (tree-consensus)
 		htmlTree, htmlErr := html.Parse(resp.Body)
@@ -778,12 +783,27 @@ func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply
 		if !p.IsLeaf() {
 			// aggregate all the children's reply
 			for _, r := range reply {
-				p.CountingBloomFilter.MergeSet(r.CBFSet)
+				verificationErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, r.CBFSet, r.CBFSetSig)
+				if verificationErr == nil {
+					p.CountingBloomFilter.MergeSet(r.CBFSet)
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func (p *SaveLocalState) signCBFSet() ([]byte, error) {
+	if p.CountingBloomFilter == nil {
+		return []byte(""), nil
+	}
+	set := p.CountingBloomFilter.GetSet()
+	sig, err := schnorr.Sign(p.Suite(), p.Private(), set)
+	if err != nil {
+		return nil, err
+	}
+	return sig, nil
 }
 
 // AggregateUnstructData take locHash, the hash of the data signed by the current
@@ -832,8 +852,10 @@ func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Poin
 // For root, we generate a CBF such that all the "columns" of all the random CBFs, so
 // the CBFs of the conodes and the CBF of the root, sum up to newZero. Note that only
 // root can executed this function (we insert an if/else condition to enforce this)
-func (p *SaveLocalState) generateRandomCBF(param []uint) (map[string][]byte, error) {
+func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte, error) {
 	if p.IsRoot() {
+		// cast param to uint
+		param := []uint{uint(param64[0]), uint(param64[1])}
 		// allocate maps
 		randomCBFs := make(map[string]*CBF)
 		randomEncryptedCBFs := make(map[string][]byte)
@@ -845,7 +867,8 @@ func (p *SaveLocalState) generateRandomCBF(param []uint) (map[string][]byte, err
 
 		// create a random and encrypted CBF for all the conodes except for root
 		for _, kp := range (p.Roster()).Publics() {
-			// we are sure that the root is executing this function
+			// skip root, not that we are sure that the roos
+			// is executing this function
 			if kp.Equal(p.TreeNode().ServerIdentity.Public) {
 				continue
 			}
@@ -857,17 +880,13 @@ func (p *SaveLocalState) generateRandomCBF(param []uint) (map[string][]byte, err
 			randomCBFs[kp.String()] = randomCBF
 
 			// encrypt the CBF using DH to seed AES
-			cipherText, err := randomCBF.Encrypt(p.Suite(), p.Private(), kp)
+			encodedCipherText, err := randomCBF.Encrypt(p.Suite(), p.Private(), kp)
 			if err != nil {
 				return nil, err
 			}
 
 			// encode the ciphertext and add to the map
-			encodedCipherText := &bytes.Buffer{}
-			e := base64.NewEncoder(base64.StdEncoding, encodedCipherText)
-			defer e.Close()
-			e.Write(cipherText)
-			randomEncryptedCBFs[kp.String()] = encodedCipherText.Bytes()
+			randomEncryptedCBFs[kp.String()] = encodedCipherText
 		}
 
 		// now create the CBF for the root of the tree, by making all the "columns" of
