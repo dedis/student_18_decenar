@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"net/http"
@@ -288,8 +287,6 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 					p.Errs = append(p.Errs, consErr)
 				}
 				consensusRoot = consRoot
-				// TODO: this should be changed somehow
-				p.VerifyCBFConsensus(p.CountingBloomFilter, consRoot)
 			}
 			// consensus on unstructured data
 			if p.MasterHash != nil && len(p.MasterHash) > 0 {
@@ -357,7 +354,7 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 			p.StringChan <- p.Url
 			p.StringChan <- p.ContentType
 			if p.MasterTree != nil {
-				p.MsgToSign <- p.BuildConsensusHtmlPage()
+				p.MsgToSign <- p.BuildCBFConsensusHtmlPage()
 			} else if p.MasterHash != nil && len(p.MasterHash) > 0 {
 				p.MsgToSign <- p.PlainData[requestedHash]
 			}
@@ -409,30 +406,6 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 	return nil
 }
 
-func (p *SaveLocalState) VerifyCBFConsensus(cbf *CBF, consensusRoot *AnonNode) {
-	threshold := byte(2)
-	locTree, _, _ := p.GetLocalData()
-	leaves := locTree.ListUniqueDataLeaves()
-	keepLeaves := []string{}
-	for _, l := range leaves {
-		if cbf.Count([]byte(l))-byte(24) >= threshold {
-			keepLeaves = append(keepLeaves, l)
-		}
-	}
-
-	// get leaves of original consensu tree
-	oldLeaves := consensusRoot.ListUniqueDataLeaves()
-	fmt.Printf("New leaves: %#v\n", keepLeaves)
-	fmt.Printf("Old leaves: %#v\n", oldLeaves)
-	equal := true
-	for i := range keepLeaves {
-		if keepLeaves[i] != oldLeaves[i] {
-			equal = false
-		}
-	}
-	fmt.Printf("Are results equal? %v\n", equal)
-}
-
 // GetLocalData retrieve the data from the p.Url and handle it to make it either a AnonNodes tree
 // or a signed hash.
 // If the returned *AnonNode tree is not nil, then the map is. Else, it is the other way around.
@@ -456,7 +429,7 @@ func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][
 			log.Lvl1("Error: Impossible to parse html code!")
 			return nil, nil, htmlErr
 		}
-		prunedHtmlTree := pruneHtmlTree(htmlTree)
+		prunedHtmlTree := htmlTree
 		anonRoot := htmlToAnonTree(p, prunedHtmlTree)
 		return anonRoot, nil, nil
 	} else {
@@ -505,14 +478,6 @@ func getRemoteData(url string) (*http.Response, string, *urlpkg.URL, error) {
 	}
 
 	return getResp, realUrl, urlStruct, getErr
-}
-
-// pruneHtmlTree is used to remove some parts of the tree that the node consider
-// irrelevant for the final consensus tree.
-//
-// Note: for now, no pruning is done to the tree.
-func pruneHtmlTree(tree *html.Node) *html.Node {
-	return tree
 }
 
 // htmlToAnonTree turn an tree composed of *html.Node to the corresponding tree
@@ -1079,60 +1044,41 @@ func getRequestedMissingHash(p *SaveLocalState) string {
 	return missingHash
 }
 
-// BuildConsensusHtmlPage takes the p.MasterTree made of *AnonNode and combine
-// this data with the p.PlainNodes in order to create an *html.Node tree. From
-// there, it creates a valid html page and outputs it.
-func (p *SaveLocalState) BuildConsensusHtmlPage() []byte {
+func (p *SaveLocalState) BuildCBFConsensusHtmlPage() []byte {
 	log.Lvl4("Begin building consensus html page")
-	// convert ExplicitNodes Tree to *html.Nodes tree
-	explicitTree := convertToExplicitTree(p.MasterTree)
-	var treeNodes []*html.Node = make([]*html.Node, 0)
-	var root html.Node = explicitToHtmlNode(p.PlainNodes, explicitTree[0])
-	treeNodes = append(treeNodes, &root)
-	for _, child := range explicitTree[0].Children {
-		child := explicitToHtmlNode(p.PlainNodes, explicitTree[child])
-		(&root).AppendChild(&child)
-		treeNodes = append(treeNodes, &child)
-	}
-	for i, node := range explicitTree {
-		if i > 0 {
-			var htmlNode *html.Node = treeNodes[i]
-			for _, child := range node.Children {
-				child := explicitToHtmlNode(p.PlainNodes, explicitTree[child])
-				htmlNode.AppendChild(&child)
-				treeNodes = append(treeNodes, &child)
-			}
+	// TODO: this should be moved somewhere else
+	threshold := byte(2)
+	anonRoot := p.MasterTree
 
+	var queue []*AnonNode
+	var curr *AnonNode
+	discovered := make(map[*AnonNode]*html.Node)
+	queue = append(queue, anonRoot)
+	for len(queue) != 0 {
+		curr = queue[0]
+		queue = queue[1:]
+		if _, ok := discovered[curr]; !ok {
+			html := p.PlainNodes[curr.HashedData]
+			if curr.FirstChild == nil { // it is a leaf
+				if p.CountingBloomFilter.Count([]byte(curr.HashedData))-byte(24) >= threshold {
+					discovered[curr] = &html
+				}
+			} else {
+				discovered[curr] = &html
+			}
+			for n := curr.FirstChild; n != nil; n = n.NextSibling {
+				queue = append(queue, n)
+			}
 		}
 	}
 
 	// convert *html.Nodes tree to an html page
 	var page bytes.Buffer
-	err := html.Render(&page, &root)
+	err := html.Render(&page, discovered[anonRoot])
 	if err != nil {
 		return nil
 	}
 	return page.Bytes()
-}
-
-// explicitToHtmlNode takes an ExplicitNode en (see utils.go) and convert it to an
-// html.Node with no parent, sibling or children but that contains the
-// plaintext data taken as follow:
-//     plainNodes[en.Field] = (html.Node).Field
-func explicitToHtmlNode(plainNodes map[string]html.Node, en ExplicitNode) html.Node {
-	var node html.Node = html.Node{
-		Parent:      nil,
-		FirstChild:  nil,
-		LastChild:   nil,
-		PrevSibling: nil,
-		NextSibling: nil,
-
-		Type:      plainNodes[en.HashedData].Type,
-		DataAtom:  plainNodes[en.HashedData].DataAtom,
-		Data:      plainNodes[en.HashedData].Data,
-		Namespace: plainNodes[en.HashedData].Namespace,
-		Attr:      plainNodes[en.HashedData].Attr}
-	return node
 }
 
 // seenmapBoolToByte turns the p.SeenMap that contains the html nodes seen by the

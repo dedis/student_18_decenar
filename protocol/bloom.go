@@ -6,10 +6,12 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/binary"
+	"hash"
 	"hash/fnv"
 	"io/ioutil"
 	"math"
 
+	"golang.org/x/crypto/hkdf"
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/util/random"
 	"gopkg.in/dedis/onet.v2/network"
@@ -50,7 +52,10 @@ func GetOptimalCBFParametersToSend(root *AnonNode) []uint64 {
 	return []uint64{uint64(p[0]), uint64(p[1])}
 }
 
+// GetOptimalCBFParametersToSend returns the optimal parameters, i.e. M and K,
+// for the tree rooted by root as []uint type
 func getOptimalCBFParameters(root *AnonNode) []uint {
+	// TODO: check if this is the adapted zero value to return
 	if root == nil {
 		return []uint{0, 0}
 	}
@@ -61,7 +66,8 @@ func getOptimalCBFParameters(root *AnonNode) []uint {
 }
 
 // AddUniqueLeaves add to c the unique leaves contained
-// in the AnonTree with the given root
+// in the AnonTree with the root given as parameter
+// Return the CBF to allow chaining
 func (c *CBF) AddUniqueLeaves(root *AnonNode) *CBF {
 	uniqueLeaves := root.ListUniqueDataLeaves()
 	for _, l := range uniqueLeaves {
@@ -71,28 +77,23 @@ func (c *CBF) AddUniqueLeaves(root *AnonNode) *CBF {
 	return c
 }
 
+// NewFilledBloomFilter create a new Bloom filter with the given parameters,
+// add the unique leaves contained in the AnonTree with the given root and
+// return the Bloom filter
 func NewFilledBloomFilter(param []uint, root *AnonNode) *CBF {
 	return NewBloomFilter(param).AddUniqueLeaves(root)
 }
 
-// Encrypt
+// Encrypt take the Set of the CBF c, encrypt it using AES-GCM, to protect the integrity of the
+// ciphertext, and return the base64 encoded ciphertext
 func (c *CBF) Encrypt(s network.Suite, private kyber.Scalar, public kyber.Point) ([]byte, error) {
-	// encrypt filter using a DH shared secret to seed AES
 	plainText := c.GetSet()
+
+	// compute DH shared key
 	sharedSecret := s.Point().Mul(private, public)
-	byteSharedSecret, err := sharedSecret.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
 
-	// create new block cipher
-	block, err := aes.NewCipher(byteSharedSecret)
-	if err != nil {
-		return nil, err
-	}
-
-	// use GCM that provides authentication and integrity protection
-	gcm, err := cipher.NewGCM(block)
+	// get AEAD cipher
+	gcm, err := newAEAD(s.(kyber.HashFactory).Hash, sharedSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -113,26 +114,17 @@ func (c *CBF) Encrypt(s network.Suite, private kyber.Scalar, public kyber.Point)
 	return encodedCipherText.Bytes(), nil
 }
 
-// Decrypt
+// Decrypt returns a CBF with the parameters given as argument and the set decrypted from the given ciphertext
 func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedCipherText []byte, parameters []uint) (*CBF, error) {
+	// compute the shared secret, i.e. the AES key
 	sharedSecret := s.Point().Mul(private, public)
-	byteSharedSecret, err := sharedSecret.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	block, err := aes.NewCipher(byteSharedSecret)
-	if err != nil {
-		return nil, err
-	}
+
+	// get AEAD cipher
+	gcm, err := newAEAD(s.(kyber.HashFactory).Hash, sharedSecret)
 
 	// decode cipher text encoded in base64
 	d := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(encodedCipherText))
 	cipherTextAndNonce, err := ioutil.ReadAll(d)
-	if err != nil {
-		return nil, err
-	}
-
-	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +140,39 @@ func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedC
 	}
 
 	return &CBF{Set: CBFSet, M: parameters[0], K: parameters[1]}, nil
+}
+
+// newAEAD returns the AEAD cipher, GCM in this case, used to encrypt the CBF's set
+func newAEAD(h func() hash.Hash, DHSharedKey kyber.Point) (cipher.AEAD, error) {
+	// get bytes representation of the DH shared key
+	byteDHSharedSecret, err := DHSharedKey.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	// derive secure AES key using HKDF
+	// Note that key length is hardcoded to 32 bytes
+	// TODO: use salt (cf. RFC5869)
+	reader := hkdf.New(h, byteDHSharedSecret, nil, nil)
+	key := make([]byte, 32)
+	_, err = reader.Read(key)
+	if err != nil {
+		return nil, err
+	}
+
+	// create block cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	// use GCM as mode of operaion
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	return gcm, nil
 }
 
 // Add add an elements e to the counting Bloom Filter c
