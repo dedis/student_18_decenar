@@ -853,6 +853,12 @@ func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Poin
 // the CBFs of the conodes and the CBF of the root, sum up to newZero. Note that only
 // root can executed this function (we insert an if/else condition to enforce this)
 func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte, error) {
+	// this is used to make the code generic even when handling
+	// additional data, i.e. css and images
+	if param64 == nil {
+		return nil, nil
+	}
+
 	if p.IsRoot() {
 		// cast param to uint
 		param := []uint{uint(param64[0]), uint(param64[1])}
@@ -861,13 +867,13 @@ func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte,
 		randomEncryptedCBFs := make(map[string][]byte)
 
 		// define constants
-		bitLen := uint(3) // TODO maybe use a constant?
+		bitLen := uint(3) // TODO use a constant?
 		conodes := len(p.Roster().List)
 		newZero := byte(conodes*(int(math.Pow(float64(2), float64(bitLen)))-1) + conodes)
 
 		// create a random and encrypted CBF for all the conodes except for root
 		for _, kp := range (p.Roster()).Publics() {
-			// skip root, not that we are sure that the roos
+			// skip root, note that we are sure that the roos
 			// is executing this function
 			if kp.Equal(p.TreeNode().ServerIdentity.Public) {
 				continue

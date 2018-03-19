@@ -91,14 +91,18 @@ func (c *CBF) Encrypt(s network.Suite, private kyber.Scalar, public kyber.Point)
 		return nil, err
 	}
 
-	// put IV at the beginning of the ciphertext
-	cipherText := make([]byte, aes.BlockSize+len(plainText))
-	iv := cipherText[:aes.BlockSize]
-	random.Bytes(iv, s.RandomStream())
+	// use GCM that provides authentication and integrity protection
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
 
-	// encrypt plainText
-	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(cipherText[aes.BlockSize:], plainText)
+	// generate nonce
+	nonce := make([]byte, gcm.NonceSize())
+	random.Bytes(nonce, s.RandomStream())
+
+	// encrypt the plaintext, the output takes the form noce||ciphertext||tag
+	cipherText := gcm.Seal(nonce, nonce, plainText, nil)
 
 	// encode in base64 the cipherText
 	encodedCipherText := &bytes.Buffer{}
@@ -123,20 +127,27 @@ func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedC
 
 	// decode cipher text encoded in base64
 	d := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(encodedCipherText))
-	cipherTextAndIV, err := ioutil.ReadAll(d)
+	cipherTextAndNonce, err := ioutil.ReadAll(d)
 	if err != nil {
 		return nil, err
 	}
 
-	// get IV
-	iv := cipherTextAndIV[:aes.BlockSize]
-	cipherText := cipherTextAndIV[aes.BlockSize:]
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	// get nonce and ciphertext
+	nonce := cipherTextAndNonce[:gcm.NonceSize()]
+	cipherText := cipherTextAndNonce[gcm.NonceSize():]
 
 	// decrypt
-	stream := cipher.NewCFBDecrypter(block, iv)
-	stream.XORKeyStream(cipherText, cipherText)
+	CBFSet, err := gcm.Open(nil, nonce, cipherText, nil)
+	if err != nil {
+		return nil, err
+	}
 
-	return &CBF{Set: cipherText, M: parameters[0], K: parameters[1]}, nil
+	return &CBF{Set: CBFSet, M: parameters[0], K: parameters[1]}, nil
 }
 
 // Add add an elements e to the counting Bloom Filter c
