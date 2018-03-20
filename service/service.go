@@ -81,12 +81,9 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	go pi.Start()
 	// get result of consensus
 	log.Lvl4("Waiting for protocol data...")
-	rTree := <-pi.(*protocol.SaveLocalState).RefTreeChan
 	var realUrl string = <-pi.(*protocol.SaveLocalState).StringChan
 	var contentType string = <-pi.(*protocol.SaveLocalState).StringChan
 	var msgToSign []byte = <-pi.(*protocol.SaveLocalState).MsgToSign
-	smc := <-pi.(*protocol.SaveLocalState).SeenMapChan
-	ssc := <-pi.(*protocol.SaveLocalState).SeenSigChan
 	stattimes = append(stattimes, "saveCosiStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	// sign the consensus website found
 	cosiclient := cosiservice.NewClient()
@@ -109,15 +106,10 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		Sig:       sig,
 		Page:      base64.StdEncoding.EncodeToString(msgToSign),
 		Timestamp: mainTimestamp,
-
-		RefTree: rTree,
-		SeenMap: smc,
-		SigMap:  ssc,
 	}
 	log.Lvl4("Create stored request")
 	// consensus protocol for all additional ressources
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
-	var webproofs []decenarch.Webproof = make([]decenarch.Webproof, 0)
 	bytePage, byteErr := base64.StdEncoding.DecodeString(webmain.Page)
 	stattimes = append(stattimes, "sameForAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	addsLinks := make([]string, 0)
@@ -131,12 +123,9 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 			api.(*protocol.SaveLocalState).Url = al
 			api.(*protocol.SaveLocalState).Threshold = threshold
 			go api.Start()
-			addrTree := <-api.(*protocol.SaveLocalState).RefTreeChan
 			ru := <-api.(*protocol.SaveLocalState).StringChan
 			ct := <-api.(*protocol.SaveLocalState).StringChan
 			mts := <-api.(*protocol.SaveLocalState).MsgToSign
-			addsmc := <-api.(*protocol.SaveLocalState).SeenMapChan
-			addssc := <-api.(*protocol.SaveLocalState).SeenSigChan
 			as, asE := cosiclient.SignatureRequest(req.Roster, mts)
 			if asE == nil {
 				aweb := decenarch.Webstore{
@@ -149,22 +138,10 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 				}
 				webadds = append(webadds, aweb)
 				webmain.AddsUrl = append(webmain.AddsUrl, al)
-
-				webproofs = append(webproofs, decenarch.Webproof{
-					Url:       ru,
-					Sig:       as,
-					Page:      base64.StdEncoding.EncodeToString(mts),
-					Timestamp: mainTimestamp,
-					RefTree:   addrTree,
-					SeenMap:   addsmc,
-					SigMap:    addssc,
-				})
-
 			}
 		}
 	}
 	webadds = append(webadds, webmain)
-	webproofs = append(webproofs, proofwebmain)
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := decenarch.NewSkipClient()
 	stattimes = append(stattimes, "skipAddStart;"+time.Now().Format(decenarch.StatTimeFormat))

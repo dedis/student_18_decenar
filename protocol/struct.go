@@ -47,8 +47,6 @@ const (
 type SaveAnnounce struct {
 	Phase               SavePhase
 	Url                 string
-	MasterTree          []ExplicitNode
-	MasterTreeSig       []byte
 	MasterHash          map[string]map[kyber.Point][]byte
 	ParametersCBF       []uint64
 	RandomEncryptedCBFs map[string][]byte
@@ -85,15 +83,10 @@ type StructSaveAnnounce struct {
 //			with the sets of the children's filters
 //     CBFSetSig:	signature of CBFSet
 type SaveReply struct {
-	Phase         SavePhase
-	Url           string
-	Errs          []error
-	MasterTree    []ExplicitNode
-	MasterTreeSig []byte
-	MasterHash    map[string]map[kyber.Point][]byte
-
-	SeenMap map[string][]byte
-	SigMap  map[string][]byte
+	Phase      SavePhase
+	Url        string
+	Errs       []error
+	MasterHash map[string]map[kyber.Point][]byte
 
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte
