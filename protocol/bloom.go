@@ -208,6 +208,12 @@ func (c *CBF) Merge(cbf *CBF) {
 	}
 }
 
+func (c *CBF) RemoveNewZero(newZero byte) {
+	for i := range c.Set {
+		c.Set[i] -= newZero
+	}
+}
+
 func (c *CBF) MergeSet(set []byte) {
 	for i, counter := range set {
 		c.Set[i] += counter

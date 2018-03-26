@@ -15,7 +15,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io/ioutil"
-	"math"
+	"math/big"
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
@@ -48,12 +48,7 @@ type SaveLocalState struct {
 	ContentType string
 	Threshold   int32
 
-	LocalTree    *AnonNode
-	LocalTreeSig []byte
-	LocSeen      []bool
-	LocSig       []byte
-	SeenMap      map[string][]bool
-	SeenSig      map[string][]byte
+	LocalTree *AnonNode
 
 	MasterHash map[string]map[kyber.Point][]byte
 
@@ -66,10 +61,6 @@ type SaveLocalState struct {
 
 	MsgToSign  chan []byte
 	StringChan chan string
-
-	RefTreeChan chan []ExplicitNode
-	SeenMapChan chan map[string][]byte
-	SeenSigChan chan map[string][]byte
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -81,13 +72,8 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		Phase:            NilPhase,
 		PlainNodes:       make(map[string]html.Node),
 		PlainData:        make(map[string][]byte),
-		SeenMap:          make(map[string][]bool),
-		SeenSig:          make(map[string][]byte),
 		MsgToSign:        make(chan []byte),
 		StringChan:       make(chan string),
-		RefTreeChan:      make(chan []ExplicitNode),
-		SeenMapChan:      make(chan map[string][]byte),
-		SeenSigChan:      make(chan map[string][]byte),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -97,8 +83,8 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	return t, nil
 }
 
-// Start sends the Announce-message to all children. This function is executed only
-// by the leader, i.e. root, of the tree
+// Start sends the Announce-message to all children. This function is executed
+// only by the leader, i.e. root, of the tree
 func (p *SaveLocalState) Start() error {
 	log.Lvl3("Starting SaveLocalState")
 	p.Phase = Consensus
@@ -107,6 +93,7 @@ func (p *SaveLocalState) Start() error {
 		log.Error("Error in save protocol Start():", err)
 		return err
 	}
+	p.LocalTree = tree
 	p.MasterHash = hash
 	paramCBF := GetOptimalCBFParametersToSend(tree)
 	randomCBFs, err := p.generateRandomCBF(paramCBF)
@@ -128,9 +115,9 @@ func (p *SaveLocalState) Start() error {
 
 // HandleAnnounce is the message going down the tree
 //
-// Note: this function must be read as multiple functions with a common begining
-// and end but each time a different 'case'. Each one can be considered as an
-// independant function.
+// Note: this function must be read as multiple functions with a common
+// begining and end but each time a different 'case'. Each one can be
+// considered as an independant function.
 func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 	log.Lvl4("Handling", p)
 	log.Lvl4("And the message", msg)
@@ -154,17 +141,18 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		log.Lvl4("Consensus Phase")
 		// retrieve data again because the Start() function is run only by root
 		// and all the nodes need the three and the hash
+		// TODO: maybe use an if for the root
 		tree, _, err := p.GetLocalData()
 		if err != nil {
-			log.Error("Error in save protocol HandleAnnounce(msg Struct save Announce:)", err)
+			log.Error("Error in save protocol HandleAnnounce(msg StructSaveAnnounce):", err)
 		}
 		p.LocalTree = tree
 		p.MasterHash = msg.SaveAnnounce.MasterHash
-		// get the CBF's parameters computed by the root
-		// TODO maybe to a function here
-		p.ParametersCBF = []uint{uint(msg.SaveAnnounce.ParametersCBF[0]), uint(msg.SaveAnnounce.ParametersCBF[1])}
-		// take the random and encrypted CBF of this node
-		p.RandomEncryptedCBF = msg.SaveAnnounce.RandomEncryptedCBFs[p.Public().String()]
+		p.ParametersCBF = castParametersCBF(msg.SaveAnnounce.ParametersCBF)
+		if !p.IsRoot() {
+			// TODO: verify signature
+			p.RandomEncryptedCBF = msg.SaveAnnounce.RandomEncryptedCBFs[p.Public().String()]
+		}
 		if !p.IsLeaf() {
 			return p.SendToChildren(&msg.SaveAnnounce)
 		} else {
@@ -229,9 +217,9 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 
 // HandleReply is the message going up the tree
 //
-// Note: this function must be read as multiple functions with a common begining
-// and end but each time a different 'case'. Each one can be considered as an
-// independant function.
+// Note: this function must be read as multiple functions with a common
+// begining and end but each time a different 'case'. Each one can be
+// considered as an independant function.
 func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 	log.Lvl4("Handling Save Reply", p)
 	log.Lvl4("And the replies", reply)
@@ -304,12 +292,11 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 				}
 			}
 		}
-
 		if p.IsRoot() {
 			p.StringChan <- p.Url
 			p.StringChan <- p.ContentType
 			if p.LocalTree != nil {
-				p.MsgToSign <- p.BuildCBFConsensusHtmlPage()
+				p.MsgToSign <- p.BuildConsensusHtmlPage()
 			} else if p.MasterHash != nil && len(p.MasterHash) > 0 {
 				p.MsgToSign <- p.PlainData[requestedHash]
 			}
@@ -358,10 +345,10 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 	return nil
 }
 
-// GetLocalData retrieve the data from the p.Url and handle it to make it either a AnonNodes tree
-// or a signed hash.
-// If the returned *AnonNode tree is not nil, then the map is. Else, it is the other way around.
-// If both returned value are nil, then an error occured.
+// GetLocalData retrieve the data from the p.Url and handle it to make it
+// either a AnonNodes tree or a signed hash.  If the returned *AnonNode tree is
+// not nil, then the map is. Else, it is the other way around.  If both
+// returned value are nil, then an error occured.
 func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][]byte, error) {
 	// get data
 	resp, realUrl, _, err := getRemoteData(p.Url)
@@ -407,12 +394,10 @@ func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][
 	return nil, localHash, nil
 }
 
-// getRemoteData take a url and return:
-// - the http response corresponding to the url
-// - the un-alias url corresponding to the response (id est the path to the file on
-// the remote server)
-// - the url structure associated (see net/url Url struct)
-// - an error status
+// getRemoteData take a url and return: - the http response corresponding to
+// the url - the un-alias url corresponding to the response (id est the path to
+// the file on the remote server) - the url structure associated (see net/url
+// Url struct) - an error status
 func getRemoteData(url string) (*http.Response, string, *urlpkg.URL, error) {
 	getResp, getErr := http.Get(url)
 	if getErr != nil {
@@ -454,10 +439,10 @@ func htmlToAnonTree(p *SaveLocalState, root *html.Node) *AnonNode {
 	return discovered[root]
 }
 
-// htmlToAnonNode take a SaveLocalState p and a pointer to html node hn as input
-// and output the *AnonNode corresponding to hn.
-// The SaveLocalState is used in the signing process of the *AnonNode and to store
-// the node locally as plaintext.
+// htmlToAnonNode take a SaveLocalState p and a pointer to html node hn as
+// input and output the *AnonNode corresponding to hn.  The SaveLocalState is
+// used in the signing process of the *AnonNode and to store the node locally
+// as plaintext.
 func htmlToAnonNode(p *SaveLocalState, hn *html.Node) *AnonNode {
 	var anonNode *AnonNode = &AnonNode{}
 	hashedData := hashHtmlData(p, hn)
@@ -470,8 +455,8 @@ func htmlToAnonNode(p *SaveLocalState, hn *html.Node) *AnonNode {
 	return anonNode
 }
 
-// hashHtmlData turn the data fields of the html node hn into a hash.
-// The "data fields" are all the attributes of an html Nodes except the ones
+// hashHtmlData turn the data fields of the html node hn into a hash.  The
+// "data fields" are all the attributes of an html Nodes except the ones
 // related to its position in the html tree. Furthermore, the list hn.Attr is
 // sorted before the hashing process.
 func hashHtmlData(p *SaveLocalState, hn *html.Node) string {
@@ -493,41 +478,59 @@ func hashHtmlData(p *SaveLocalState, hn *html.Node) string {
 }
 
 // AggregateErrors put all the errors contained in the children reply inside
-// the SaveLocalState p field p.Errs. It allows the current protocol to transmit
-// the errors from its children to its parent.
+// the SaveLocalState p field p.Errs. It allows the current protocol to
+// transmit the errors from its children to its parent.
 func (p *SaveLocalState) AggregateErrors(reply []StructSaveReply) {
 	for _, r := range reply {
 		p.Errs = append(p.Errs, r.Errs...)
 	}
 }
 
+// AggregateCBF compute the local CBF of the node, add the random CBF if the
+// node is not root and remove the newZero CBF is the node is root. Moreover,
+// the parant nodes aggregate the results of the children if the signature for
+// the CBF set is valid. If the signature is not valid, the child's
+// contribution is not taken into account and the verification error is added
+// to p.Errs, but the function does not return error in this case.
 func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply) error {
 	// This method is only for structured data
 	if p.LocalTree != nil {
 		param := p.ParametersCBF
 		// fill filter with local data
 		p.CountingBloomFilter = NewFilledBloomFilter(param, locTree)
-		var randomCBF *CBF
-		var err error
+		log.Lvl4("Filled CBF for node", p.ServerIdentity().Address,
+			"is", p.CountingBloomFilter)
 		if !p.IsRoot() {
 			// decrypt random vector, where the public key is the root public key
-			randomCBF, err = Decrypt(p.Suite(), p.Private(), p.Root().ServerIdentity.Public, p.RandomEncryptedCBF, param)
+			randomCBF, err := Decrypt(p.Suite(), p.Private(), p.Root().ServerIdentity.Public, p.RandomEncryptedCBF, param)
 			if err != nil {
 				return err
 			}
-		} else {
-			randomCBF = &CBF{Set: p.RandomEncryptedCBF, M: param[0], K: param[1]}
+			log.Lvl4("Random CBF for node", p.ServerIdentity(), "is", randomCBF)
+
+			// merge random CBF with local CBF
+			p.CountingBloomFilter.Merge(randomCBF)
+			log.Lvl4("Result of merging local CBF and random CBF for node",
+				p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 		}
-		// merge random CBF with local CBF
-		p.CountingBloomFilter.Merge(randomCBF)
 
 		if !p.IsLeaf() {
 			// aggregate all the children's reply
 			for _, r := range reply {
 				verificationErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, r.CBFSet, r.CBFSetSig)
 				if verificationErr == nil {
+					log.Lvl4("Valid CBF set signature for node", r.ServerIdentity.Address)
 					p.CountingBloomFilter.MergeSet(r.CBFSet)
+				} else {
+					log.Lvl1("Invalid signature for node", r.ServerIdentity.Address)
+					p.Errs = append(p.Errs, verificationErr)
 				}
+			}
+
+			// remove newZero vector from final CBF. Only root is supposed to remove the
+			// filter containing only newZeros
+			if p.IsRoot() {
+				p.CountingBloomFilter.RemoveNewZero(byte(len(p.LocalTree.ListUniqueDataLeaves())))
 			}
 		}
 	}
@@ -535,6 +538,9 @@ func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply
 	return nil
 }
 
+// signCBFSet sign the set of the counting Bloom filter with the private key of
+// the node represented by p. An error is returnd an error occur during the
+// signing process.
 func (p *SaveLocalState) signCBFSet() ([]byte, error) {
 	if p.CountingBloomFilter == nil {
 		return []byte(""), nil
@@ -542,14 +548,19 @@ func (p *SaveLocalState) signCBFSet() ([]byte, error) {
 	set := p.CountingBloomFilter.GetSet()
 	sig, err := schnorr.Sign(p.Suite(), p.Private(), set)
 	if err != nil {
+		log.Lvl1("Error! Impossible to sign CBF set", err)
+		p.Errs = append(p.Errs, err)
 		return nil, err
 	}
+	log.Lvl4("CBF set", set, "for node", p.ServerIdentity().Address,
+		"signed with signature", sig)
 	return sig, nil
 }
 
-// AggregateUnstructData take locHash, the hash of the data signed by the current
-// node and reply the replies of the node's children. It verifies and signs the
-// p.MasterHash with the signatures of both the nodes and its chidren.
+// AggregateUnstructData take locHash, the hash of the data signed by the
+// current node and reply the replies of the node's children. It verifies and
+// signs the p.MasterHash with the signatures of both the nodes and its
+// chidren.
 func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Point][]byte, reply []StructSaveReply) {
 	if p.MasterHash != nil && len(p.MasterHash) > 0 {
 		for img, sigmap := range locHash {
@@ -589,14 +600,13 @@ func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Poin
 	}
 }
 
-// generateRandomCBF generates random and encrypted CBFs for all the conodes, except root.
-// For root, we generate a CBF such that all the "columns" of all the random CBFs, so
-// the CBFs of the conodes and the CBF of the root, sum up to newZero. Note that only
-// root can executed this function (we insert an if/else condition to enforce this)
+// generateRandomCBF generates random and encrypted CBFs for all the conodes,
+// except root Return an error if the encryption of the random CBFs returns an
+// error
 func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte, error) {
 	// this is used to make the code generic even when handling
 	// additional data, i.e. css and images
-	if param64 == nil {
+	if p.LocalTree == nil {
 		return nil, nil
 	}
 
@@ -604,30 +614,41 @@ func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte,
 		// cast param to uint
 		param := []uint{uint(param64[0]), uint(param64[1])}
 		// allocate maps
-		randomCBFs := make(map[string]*CBF)
+		randomCBFs := make(map[kyber.Point]*CBF)
 		randomEncryptedCBFs := make(map[string][]byte)
 
 		// define constants
-		bitLen := uint(3) // TODO use a constant?
-		conodes := len(p.Roster().List)
-		newZero := byte(conodes*(int(math.Pow(float64(2), float64(bitLen)))-1) + conodes)
+		leaves := len(p.Roster().List) - 1
+		newZero := len(p.LocalTree.ListUniqueDataLeaves())
+		maxUint := ^uint(0)
+		maxInt := int(maxUint >> 1)
+
+		// allocate randomMatrix
+		randomMatrix := make([][]byte, leaves)
+		for i := range randomMatrix {
+			randomMatrix[i] = make([]byte, param[0])
+		}
+
+		// fill random matrix
+		for i := uint(0); i < param[0]; i++ {
+			for k := 0; k < newZero; k++ {
+				bucket := int(random.Int(big.NewInt(int64(maxInt)), p.Suite().RandomStream()).Int64()) % leaves
+				randomMatrix[bucket][i]++
+			}
+		}
 
 		// create a random and encrypted CBF for all the conodes except for root
-		for _, kp := range (p.Roster()).Publics() {
+		for i, kp := range (p.Roster()).Publics() {
 			// skip root, note that we are sure that the roos
 			// is executing this function
 			if kp.Equal(p.TreeNode().ServerIdentity.Public) {
 				continue
 			}
 			// generate random counting Bloom filter
-			randomCBF := NewBloomFilter(param)
-			for i := range randomCBF.GetSet() {
-				randomCBF.SetByte(uint(i), random.Bits(3, false, p.Suite().RandomStream())[0])
-			}
-			randomCBFs[kp.String()] = randomCBF
+			randomCBFs[kp] = &CBF{Set: randomMatrix[i], M: param[0], K: param[1]}
 
 			// encrypt the CBF using DH to seed AES
-			encodedCipherText, err := randomCBF.Encrypt(p.Suite(), p.Private(), kp)
+			encodedCipherText, err := randomCBFs[kp].Encrypt(p.Suite(), p.Private(), kp)
 			if err != nil {
 				return nil, err
 			}
@@ -636,22 +657,6 @@ func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte,
 			randomEncryptedCBFs[kp.String()] = encodedCipherText
 		}
 
-		// now create the CBF for the root of the tree, by making all the "columns" of
-		// all the random CBFs summing up to newZero.
-		// Note that param[0] = m, the number of buckets in the CBF
-		rootCBF := NewBloomFilter(param)
-		for i := uint(0); i < param[0]; i++ {
-			var sum byte
-			for _, cbf := range randomCBFs {
-				sum += cbf.GetByte(i)
-			}
-			val := newZero - sum
-			rootCBF.SetByte(i, val)
-		}
-		randomCBFs[p.TreeNode().ServerIdentity.Public.String()] = rootCBF
-		// return the root vector in the randomEncryptedCBFs map, even if it's not encrypted
-		randomEncryptedCBFs[p.TreeNode().ServerIdentity.Public.String()] = rootCBF.GetSet()
-
 		return randomEncryptedCBFs, nil
 	}
 
@@ -659,12 +664,11 @@ func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte,
 }
 
 // getMostSignedHash returns a new map containing only the entry of the map
-// where the number of signature is the highest.
-// If hashmap is nil, it returns nil.
-// If no entry are under p.Threshold, it returns a non-nil error.
+// where the number of signature is the highest.  If hashmap is nil, it returns
+// nil.  If no entry are under p.Threshold, it returns a non-nil error.
 //
-// Warning: the signatures verification must be done BEFORE using this function.
-// No signatures verification are done here.
+// Warning: the signatures verification must be done BEFORE using this
+// function.  No signatures verification are done here.
 func getMostSignedHash(p *SaveLocalState, hashmap map[string]map[kyber.Point][]byte) (map[string]map[kyber.Point][]byte, error) {
 	if hashmap == nil {
 		return nil, nil
@@ -689,9 +693,9 @@ func getMostSignedHash(p *SaveLocalState, hashmap map[string]map[kyber.Point][]b
 }
 
 // getRequestedMissingHash should be used only during the RequestMissingData
-// phase. It outputs the hash of the data requested by the root.
-// A hash is produced only if the number of verified signature is higher than
-// the node threshold.
+// phase. It outputs the hash of the data requested by the root.  A hash is
+// produced only if the number of verified signature is higher than the node
+// threshold.
 func getRequestedMissingHash(p *SaveLocalState) string {
 	var missingHash string
 	for dataH, sigs := range p.MasterHash {
@@ -717,12 +721,17 @@ func getRequestedMissingHash(p *SaveLocalState) string {
 	return missingHash
 }
 
-func (p *SaveLocalState) BuildCBFConsensusHtmlPage() []byte {
+// BuildConsensusHtmlPage takes the p.MasterTree made of *AnonNode and combine
+// this data with the p.PlainNodes in order to create an *html.Node tree. Only
+// the leaves that appears in the combined Bloom filter more than threshold
+// times are included in the HTML page. All the other nodes are included by the
+// root.  The output is a valid HTML page there, it creates a valid html page
+// and outputs it.
+func (p *SaveLocalState) BuildConsensusHtmlPage() []byte {
 	log.Lvl4("Begin building consensus html page")
-	// TODO: this should be moved somewhere else
-	threshold := byte(2)
-	anonRoot := p.LocalTree
+	threshold := byte(p.Threshold)
 
+	anonRoot := p.LocalTree
 	var queue []*AnonNode
 	var curr *AnonNode
 	discovered := make(map[*AnonNode]*html.Node)
@@ -752,4 +761,10 @@ func (p *SaveLocalState) BuildCBFConsensusHtmlPage() []byte {
 		return nil
 	}
 	return page.Bytes()
+}
+
+// castParametersCBF from uint64 to uint, since uint64 is needed to send the
+// paramters across the conodes
+func castParametersCBF(param []uint64) []uint {
+	return []uint{uint(param[0]), uint(param[1])}
 }

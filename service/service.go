@@ -149,6 +149,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "saveReqEnd;"+time.Now().Format(decenarch.StatTimeFormat))
 	sInt := strconv.Itoa(numNodes)
 	stattimes = append(stattimes, "numbrNodes;"+sInt)
+	// TODO: this should be corrected, because for now RefTree is nil
 	sInt = strconv.Itoa(len(proofwebmain.RefTree))
 	stattimes = append(stattimes, "numberHtmlTreeNodes;"+sInt)
 	resp := &decenarch.SaveResponse{Times: stattimes}
