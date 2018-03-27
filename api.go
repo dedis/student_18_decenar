@@ -54,8 +54,9 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, error) {
 	csvLine := "web,numConodes,numHtmlNodes,start,reqS,cosi,adds,skip\n"
 	// web, numConodes
 	csvLine += url + "," + csvMap["numbrNodes"] + ","
-	// numHtmlNodes
-	csvLine += csvMap["numberHtmlTreeNodes"] + ","
+	// CBF parameters
+	csvLine += csvMap["mCBF"] + ","
+	csvLine += csvMap["kCBF"] + ","
 	// start (always == 0)
 	t1, _ := time.Parse(StatTimeFormat, csvMap["genstart"])
 	t2, _ := time.Parse(StatTimeFormat, csvMap["genstart"])

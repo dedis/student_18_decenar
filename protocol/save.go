@@ -20,6 +20,7 @@ import (
 	urlpkg "net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -59,21 +60,23 @@ type SaveLocalState struct {
 	RandomEncryptedCBF  []byte
 	CountingBloomFilter *CBF
 
-	MsgToSign  chan []byte
-	StringChan chan string
+	MsgToSign         chan []byte
+	StringChan        chan string
+	ParametersCBFChan chan []uint
 }
 
 // NewSaveProtocol initialises the structure for use in one round
 func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	log.Lvl4("Creating NewSaveProtocol")
 	t := &SaveLocalState{
-		TreeNodeInstance: n,
-		Url:              "",
-		Phase:            NilPhase,
-		PlainNodes:       make(map[string]html.Node),
-		PlainData:        make(map[string][]byte),
-		MsgToSign:        make(chan []byte),
-		StringChan:       make(chan string),
+		TreeNodeInstance:  n,
+		Url:               "",
+		Phase:             NilPhase,
+		PlainNodes:        make(map[string]html.Node),
+		PlainData:         make(map[string][]byte),
+		MsgToSign:         make(chan []byte),
+		StringChan:        make(chan string),
+		ParametersCBFChan: make(chan []uint),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -96,10 +99,16 @@ func (p *SaveLocalState) Start() error {
 	p.LocalTree = tree
 	p.MasterHash = hash
 	paramCBF := GetOptimalCBFParametersToSend(tree)
-	randomCBFs, err := p.generateRandomCBF(paramCBF)
+	randomCBFs, err := p.generateRandomCBFs(paramCBF)
 	if err != nil {
 		log.Error("Error in save protocol Start():", err)
 		return err
+	}
+	// send useful information to the service
+	// TODO: mybe move this to compute all only one time
+	if p.LocalTree != nil {
+		p.ParametersCBFChan <- castParametersCBF(paramCBF)
+		p.StringChan <- strconv.Itoa(len(tree.ListUniqueDataLeaves()))
 	}
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
@@ -150,7 +159,8 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		p.MasterHash = msg.SaveAnnounce.MasterHash
 		p.ParametersCBF = castParametersCBF(msg.SaveAnnounce.ParametersCBF)
 		if !p.IsRoot() {
-			// TODO: verify signature
+			// TODO: verify signature of root, to be sure that no one is modifying the encrypted
+			// random vectors
 			p.RandomEncryptedCBF = msg.SaveAnnounce.RandomEncryptedCBFs[p.Public().String()]
 		}
 		if !p.IsLeaf() {
@@ -295,6 +305,7 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 		if p.IsRoot() {
 			p.StringChan <- p.Url
 			p.StringChan <- p.ContentType
+
 			if p.LocalTree != nil {
 				p.MsgToSign <- p.BuildConsensusHtmlPage()
 			} else if p.MasterHash != nil && len(p.MasterHash) > 0 {
@@ -530,7 +541,9 @@ func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply
 			// remove newZero vector from final CBF. Only root is supposed to remove the
 			// filter containing only newZeros
 			if p.IsRoot() {
+				log.Lvl4("Final CBF before removing new zero vector", p.CountingBloomFilter.GetSet())
 				p.CountingBloomFilter.RemoveNewZero(byte(len(p.LocalTree.ListUniqueDataLeaves())))
+				log.Lvl4("Final CBF after removing new zero vector", p.CountingBloomFilter.GetSet())
 			}
 		}
 	}
@@ -600,10 +613,10 @@ func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Poin
 	}
 }
 
-// generateRandomCBF generates random and encrypted CBFs for all the conodes,
+// generateRandomCBFs generates random and encrypted CBFs for all the conodes,
 // except root Return an error if the encryption of the random CBFs returns an
 // error
-func (p *SaveLocalState) generateRandomCBF(param64 []uint64) (map[string][]byte, error) {
+func (p *SaveLocalState) generateRandomCBFs(param64 []uint64) (map[string][]byte, error) {
 	// this is used to make the code generic even when handling
 	// additional data, i.e. css and images
 	if p.LocalTree == nil {

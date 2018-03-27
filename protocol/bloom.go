@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"hash"
-	"hash/fnv"
 	"io/ioutil"
 	"math"
+	"math/big"
 
 	"golang.org/x/crypto/hkdf"
 	"gopkg.in/dedis/kyber.v2"
@@ -220,6 +221,26 @@ func (c *CBF) MergeSet(set []byte) {
 	}
 }
 
+// Shuffle returns a shuffled CBF, i.e. a CBF with the same set as c,
+// but shuffled. The parameters remain the same. To shuffle the set
+// the Fisher–Yates shuffle algorithm is used
+// see https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+func (c *CBF) Shuffle(s network.Suite) *CBF {
+	maxUint := ^uint(0)
+	maxInt := int(maxUint >> 1)
+	shuffledCBF := NewBloomFilter(c.getParameters())
+	for i := len(c.Set) - 1; i > 0; i-- {
+		j := int(random.Int(big.NewInt(int64(maxInt)), s.RandomStream()).Int64()) % (i + 1)
+		shuffledCBF.Set[i], shuffledCBF.Set[j] = c.Set[j], c.Set[i]
+	}
+
+	return shuffledCBF
+}
+
+func (c *CBF) getParameters() []uint {
+	return []uint{c.M, c.K}
+}
+
 func (c *CBF) GetSet() []byte {
 	if c == nil {
 		return nil
@@ -238,28 +259,20 @@ func (c *CBF) GetByte(i uint) byte {
 // hashes returns the four hash of e that are used to create
 // the k hash values
 func hashes(e []byte) [4]uint64 {
-	cst := []byte("constant")
-	hasher := fnv.New128()
-	hasher.Write(e)
-	sum := hasher.Sum(nil)
+	hasher := sha256.New()
+	sum := hasher.Sum(e)
 	h1 := binary.BigEndian.Uint64(sum[0:])
 	h2 := binary.BigEndian.Uint64(sum[8:])
-	hasher.Write(cst)
-	sum = hasher.Sum(nil)
-	h3 := binary.BigEndian.Uint64(sum[0:])
-	h4 := binary.BigEndian.Uint64(sum[8:])
+	h3 := binary.BigEndian.Uint64(sum[16:])
+	h4 := binary.BigEndian.Uint64(sum[24:])
 	return [4]uint64{h1, h2, h3, h4}
 }
 
 // location returns the ith hashed location using the four base hash values
-func location(h [4]uint64, i uint) uint64 {
-	ii := uint64(i)
-	return h[ii%2] + ii*h[2+(((ii+(ii%2))%4)/2)]
-}
-
-// location returns the ith hashed location using the four base hash values
+// uses a slightly modified version of the double hashing scheme
+// see https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf
 func (c *CBF) location(h [4]uint64, i uint) uint {
-	return uint(location(h, i) % uint64(c.M))
+	return uint(h[i%4]+uint64(i)*h[(i+1)%4]) % c.M
 }
 
 // bestParameters return an estimate of m and k given the number of elements n

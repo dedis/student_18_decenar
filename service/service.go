@@ -63,7 +63,8 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	log.Lvl3("Decenarch Service new SaveRequest")
 	numNodes := len(req.Roster.List)
-	tree := req.Roster.GenerateNaryTreeWithRoot(numNodes-1, s.ServerIdentity())
+	// TODO: this is used only for testing, use GenerateBinaryTree for real application
+	tree := req.Roster.GenerateNaryTreeWithRoot(1, s.ServerIdentity())
 	if tree == nil {
 		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
 	}
@@ -81,6 +82,8 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	go pi.Start()
 	// get result of consensus
 	log.Lvl4("Waiting for protocol data...")
+	var parametersCBF []uint = <-pi.(*protocol.SaveLocalState).ParametersCBFChan
+	var uniqueLeaves string = <-pi.(*protocol.SaveLocalState).StringChan
 	var realUrl string = <-pi.(*protocol.SaveLocalState).StringChan
 	var contentType string = <-pi.(*protocol.SaveLocalState).StringChan
 	var msgToSign []byte = <-pi.(*protocol.SaveLocalState).MsgToSign
@@ -101,12 +104,12 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		AddsUrl:     make([]string, 0),
 		Timestamp:   mainTimestamp,
 	}
-	proofwebmain := decenarch.Webproof{
-		Url:       realUrl,
-		Sig:       sig,
-		Page:      base64.StdEncoding.EncodeToString(msgToSign),
-		Timestamp: mainTimestamp,
-	}
+	//proofwebmain := decenarch.Webproof{
+	//	Url:       realUrl,
+	//	Sig:       sig,
+	//	Page:      base64.StdEncoding.EncodeToString(msgToSign),
+	//	Timestamp: mainTimestamp,
+	//}
 	log.Lvl4("Create stored request")
 	// consensus protocol for all additional ressources
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
@@ -149,9 +152,9 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "saveReqEnd;"+time.Now().Format(decenarch.StatTimeFormat))
 	sInt := strconv.Itoa(numNodes)
 	stattimes = append(stattimes, "numbrNodes;"+sInt)
-	// TODO: this should be corrected, because for now RefTree is nil
-	sInt = strconv.Itoa(len(proofwebmain.RefTree))
-	stattimes = append(stattimes, "numberHtmlTreeNodes;"+sInt)
+	stattimes = append(stattimes, "uniqueLeaves;"+uniqueLeaves)
+	stattimes = append(stattimes, "mCBF;"+strconv.Itoa(int(parametersCBF[0])))
+	stattimes = append(stattimes, "kCBF;"+strconv.Itoa(int(parametersCBF[1])))
 	resp := &decenarch.SaveResponse{Times: stattimes}
 	return resp, nil
 }
