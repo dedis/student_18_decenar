@@ -45,11 +45,16 @@ const (
 //				encrypted for each conode using a DH shared secret. Note
 //				that the CBF of the root is not encrypted.
 type SaveAnnounce struct {
-	Phase               SavePhase
-	Url                 string
-	MasterHash          map[string]map[kyber.Point][]byte
-	ParametersCBF       []uint64
-	RandomEncryptedCBFs map[string][]byte
+	Phase           SavePhase
+	Url             string
+	MasterHash      map[string]map[kyber.Point][]byte
+	ParametersCBF   []uint64
+	NoiseForConodes map[string]*Noise
+}
+
+type Noise struct {
+	EncryptedCBF []byte
+	CBFSum       int
 }
 
 // StructSaveAnnounce just contains SaveAnnounce and the data necessary to
@@ -91,8 +96,9 @@ type SaveReply struct {
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte
 
-	CBFSet    []byte
-	CBFSetSig []byte
+	NoisyCBFSet    []byte
+	ShuffledCBFSet []byte
+	CBFSetSig      []byte
 }
 
 // StructSaveReply just contains StructSaveReply and the data necessary to

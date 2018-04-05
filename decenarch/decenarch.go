@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -59,6 +60,10 @@ func main() {
 				cli.StringFlag{
 					Name:  "url, u",
 					Usage: "Provide url to save",
+				},
+				cli.BoolFlag{
+					Name:  "proof, p",
+					Usage: "Show proofs for the consensus algorithm",
 				},
 			},
 		},
@@ -147,6 +152,9 @@ func cmdSave(c *cli.Context) error {
 		log.Fatal("When asking to save", url, ":", err)
 	}
 	log.Info("Website", url, "saved.", resp)
+	if c.Bool("proof") {
+		fmt.Println("Show the proof here")
+	}
 	return nil
 }
 

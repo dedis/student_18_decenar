@@ -1,14 +1,12 @@
 package protocol
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"hash"
-	"io/ioutil"
 	"math"
 	"math/big"
 
@@ -61,7 +59,7 @@ func getOptimalCBFParameters(root *AnonNode) []uint {
 		return []uint{0, 0}
 	}
 	uniqueLeaves := uint(len(root.ListUniqueDataLeaves()))
-	m, k := bestParameters(uniqueLeaves, 0.001)
+	m, k := bestParameters(uniqueLeaves, 0.000001)
 
 	return []uint{m, k}
 }
@@ -88,7 +86,7 @@ func NewFilledBloomFilter(param []uint, root *AnonNode) *CBF {
 // Encrypt take the Set of the CBF c, encrypt it using AES-GCM, to protect the integrity of the
 // ciphertext, and return the base64 encoded ciphertext
 func (c *CBF) Encrypt(s network.Suite, private kyber.Scalar, public kyber.Point) ([]byte, error) {
-	plainText := c.GetSet()
+	plain := c.Set
 
 	// compute DH shared key
 	sharedSecret := s.Point().Mul(private, public)
@@ -104,19 +102,21 @@ func (c *CBF) Encrypt(s network.Suite, private kyber.Scalar, public kyber.Point)
 	random.Bytes(nonce, s.RandomStream())
 
 	// encrypt the plaintext, the output takes the form noce||ciphertext||tag
-	cipherText := gcm.Seal(nonce, nonce, plainText, nil)
+	cipher := gcm.Seal(nonce, nonce, plain, nil)
 
 	// encode in base64 the cipherText
-	encodedCipherText := &bytes.Buffer{}
-	e := base64.NewEncoder(base64.StdEncoding, encodedCipherText)
-	defer e.Close()
-	e.Write(cipherText)
+	// Note that we have to use RawStdEncoding because simply StdEncoding
+	// does not work, because of padding
+	encodedCipher := make([]byte, base64.RawStdEncoding.EncodedLen(len(cipher)))
+	base64.RawStdEncoding.Encode(encodedCipher, cipher)
 
-	return encodedCipherText.Bytes(), nil
+	//return encodedCipherText.Bytes(), nil
+	//return cipher, nil
+	return encodedCipher, nil
 }
 
 // Decrypt returns a CBF with the parameters given as argument and the set decrypted from the given ciphertext
-func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedCipherText []byte, parameters []uint) (*CBF, error) {
+func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedCipher []byte, parameters []uint) (*CBF, error) {
 	// compute the shared secret, i.e. the AES key
 	sharedSecret := s.Point().Mul(private, public)
 
@@ -124,18 +124,18 @@ func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedC
 	gcm, err := newAEAD(s.(kyber.HashFactory).Hash, sharedSecret)
 
 	// decode cipher text encoded in base64
-	d := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(encodedCipherText))
-	cipherTextAndNonce, err := ioutil.ReadAll(d)
+	cipherAndNonce := make([]byte, base64.RawStdEncoding.DecodedLen(len(encodedCipher)))
+	_, err = base64.RawStdEncoding.Decode(cipherAndNonce, encodedCipher)
 	if err != nil {
 		return nil, err
 	}
 
 	// get nonce and ciphertext
-	nonce := cipherTextAndNonce[:gcm.NonceSize()]
-	cipherText := cipherTextAndNonce[gcm.NonceSize():]
+	nonce := cipherAndNonce[:gcm.NonceSize()]
+	cipher := cipherAndNonce[gcm.NonceSize():]
 
 	// decrypt
-	CBFSet, err := gcm.Open(nil, nonce, cipherText, nil)
+	CBFSet, err := gcm.Open(nil, nonce, cipher, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,12 @@ func newAEAD(h func() hash.Hash, DHSharedKey kyber.Point) (cipher.AEAD, error) {
 func (c *CBF) Add(e []byte) *CBF {
 	h := hashes(e)
 	for i := uint(0); i < c.K; i++ {
-		c.Set[c.location(h, i)]++
+		location := c.location(h, i)
+		// if we are at the maximum, we keep the maximum to avoid
+		// overflow
+		if c.Set[location] < 255 {
+			c.Set[location]++
+		}
 	}
 
 	// return c to allow chaining
@@ -221,31 +226,37 @@ func (c *CBF) MergeSet(set []byte) {
 	}
 }
 
+func (c *CBF) Sum() int {
+	sum := 0
+	for _, value := range c.Set {
+		sum += int(value)
+	}
+
+	return sum
+}
+
 // Shuffle returns a shuffled CBF, i.e. a CBF with the same set as c,
 // but shuffled. The parameters remain the same. To shuffle the set
 // the Fisher–Yates shuffle algorithm is used
 // see https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
-func (c *CBF) Shuffle(s network.Suite) *CBF {
-	maxUint := ^uint(0)
-	maxInt := int(maxUint >> 1)
-	shuffledCBF := NewBloomFilter(c.getParameters())
-	for i := len(c.Set) - 1; i > 0; i-- {
-		j := int(random.Int(big.NewInt(int64(maxInt)), s.RandomStream()).Int64()) % (i + 1)
-		shuffledCBF.Set[i], shuffledCBF.Set[j] = c.Set[j], c.Set[i]
+func (c *CBF) ShuffleSet(s network.Suite) []byte {
+	if c == nil {
+		return nil
 	}
 
-	return shuffledCBF
+	maxUint := ^uint(0)
+	maxInt := int(maxUint >> 1)
+	shuffledSet := make([]byte, len(c.Set))
+	for i := len(c.Set) - 1; i > 0; i-- {
+		j := int(random.Int(big.NewInt(int64(maxInt)), s.RandomStream()).Int64()) % (i + 1)
+		shuffledSet[i], shuffledSet[j] = c.Set[j], c.Set[i]
+	}
+
+	return shuffledSet
 }
 
 func (c *CBF) getParameters() []uint {
 	return []uint{c.M, c.K}
-}
-
-func (c *CBF) GetSet() []byte {
-	if c == nil {
-		return nil
-	}
-	return c.Set
 }
 
 func (c *CBF) SetByte(i uint, value byte) {
@@ -254,6 +265,14 @@ func (c *CBF) SetByte(i uint, value byte) {
 
 func (c *CBF) GetByte(i uint) byte {
 	return c.Set[i]
+}
+
+func (c *CBF) GetSet() []byte {
+	if c == nil {
+		return nil
+	}
+
+	return c.Set
 }
 
 // hashes returns the four hash of e that are used to create
