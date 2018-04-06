@@ -14,15 +14,12 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"math/big"
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
-	"sort"
 	"strconv"
-	"strings"
 
 	"golang.org/x/net/html"
 
@@ -50,7 +47,7 @@ type SaveLocalState struct {
 	ContentType string
 	Threshold   int32
 
-	LocalTree *AnonNode
+	LocalTree *html.Node
 
 	MasterHash map[string]map[kyber.Point][]byte
 
@@ -110,7 +107,7 @@ func (p *SaveLocalState) Start() error {
 	// TODO: mybe move this to compute all only one time
 	if p.LocalTree != nil {
 		p.ParametersCBFChan <- castParametersCBF(paramCBF)
-		p.StringChan <- strconv.Itoa(len(tree.ListUniqueDataLeaves()))
+		p.StringChan <- strconv.Itoa(len(listUniqueDataLeaves(tree)))
 	}
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
@@ -355,10 +352,10 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 }
 
 // GetLocalData retrieve the data from the p.Url and handle it to make it
-// either a AnonNodes tree or a signed hash.  If the returned *AnonNode tree is
+// either a *html.Node tree or a signed hash.  If the returned *html.Node tree is
 // not nil, then the map is. Else, it is the other way around.  If both
 // returned value are nil, then an error occured.
-func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][]byte, error) {
+func (p *SaveLocalState) GetLocalData() (*html.Node, map[string]map[kyber.Point][]byte, error) {
 	// get data
 	resp, realUrl, _, err := getRemoteData(p.Url)
 	if err != nil {
@@ -377,8 +374,7 @@ func (p *SaveLocalState) GetLocalData() (*AnonNode, map[string]map[kyber.Point][
 			log.Lvl1("Error: Impossible to parse html code!")
 			return nil, nil, htmlErr
 		}
-		anonRoot := htmlToAnonTree(p, htmlTree)
-		return anonRoot, nil, nil
+		return htmlTree, nil, nil
 	}
 
 	// procedure for all other files (consensus on whole hash)
@@ -424,68 +420,6 @@ func getRemoteData(url string) (*http.Response, string, *urlpkg.URL, error) {
 	return getResp, realUrl, urlStruct, getErr
 }
 
-// htmlToAnonTree turn an tree composed of *html.Node to the corresponding tree
-// composed of *AnonNode
-func htmlToAnonTree(p *SaveLocalState, root *html.Node) *AnonNode {
-	var queue []*html.Node
-	var curr *html.Node
-	discovered := make(map[*html.Node]*AnonNode)
-	queue = append(queue, root)
-	for len(queue) != 0 {
-		curr = queue[0]
-		queue = queue[1:]
-		if _, ok := discovered[curr]; !ok {
-			an := htmlToAnonNode(p, curr)
-			discovered[curr] = an
-			if curr.Parent != nil {
-				discovered[curr.Parent].AppendChild(an)
-			}
-			for n := curr.FirstChild; n != nil; n = n.NextSibling {
-				queue = append(queue, n)
-			}
-		}
-	}
-	return discovered[root]
-}
-
-// htmlToAnonNode take a SaveLocalState p and a pointer to html node hn as
-// input and output the *AnonNode corresponding to hn.  The SaveLocalState is
-// used in the signing process of the *AnonNode and to store the node locally
-// as plaintext.
-func htmlToAnonNode(p *SaveLocalState, hn *html.Node) *AnonNode {
-	var anonNode *AnonNode = &AnonNode{}
-	hashedData := hashHtmlData(p, hn)
-	anonNode.HashedData = hashedData
-	anonNode.Seen = true
-
-	// save node locally (only its data are relevant, not its position)
-	p.PlainNodes[hashedData] = *hn
-
-	return anonNode
-}
-
-// hashHtmlData turn the data fields of the html node hn into a hash.  The
-// "data fields" are all the attributes of an html Nodes except the ones
-// related to its position in the html tree. Furthermore, the list hn.Attr is
-// sorted before the hashing process.
-func hashHtmlData(p *SaveLocalState, hn *html.Node) string {
-	if hn == nil {
-		return ""
-	}
-
-	// we sort attribute in order to have deterministic hash
-	var attrList []string = make([]string, 0)
-	for _, a := range hn.Attr {
-		attrList = append(attrList, a.Namespace+a.Key+a.Val)
-	}
-	sort.Sort(sort.StringSlice(attrList))
-
-	data := []byte(hn.Namespace + hn.Data + strings.Join(attrList, ""))
-	hashedData := p.Suite().(kyber.HashFactory).Hash().Sum(data)
-
-	return base64.StdEncoding.EncodeToString(hashedData)
-}
-
 // AggregateErrors put all the errors contained in the children reply inside
 // the SaveLocalState p field p.Errs. It allows the current protocol to
 // transmit the errors from its children to its parent.
@@ -501,7 +435,7 @@ func (p *SaveLocalState) AggregateErrors(reply []StructSaveReply) {
 // the CBF set is valid. If the signature is not valid, the child's
 // contribution is not taken into account and the verification error is added
 // to p.Errs, but the function does not return error in this case.
-func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply) error {
+func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveReply) error {
 	// This method is only for structured data
 	if p.LocalTree != nil {
 		param := p.ParametersCBF
@@ -509,8 +443,6 @@ func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply
 		p.CountingBloomFilter = NewFilledBloomFilter(param, locTree)
 		log.Lvl4("Filled CBF for node", p.ServerIdentity().Address,
 			"is", p.CountingBloomFilter)
-		printMax(p.CountingBloomFilter.Set)
-
 		// publish shuffeled set of the local Bloom filter
 		p.ShuffledCBFSet = p.CountingBloomFilter.ShuffleSet(p.Suite())
 		if !p.IsRoot() {
@@ -530,7 +462,6 @@ func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply
 		if !p.IsLeaf() {
 			// aggregate all the children's reply
 			for _, r := range reply {
-				printMax(r.ShuffledCBFSet)
 				verificationErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, r.NoisyCBFSet, r.CBFSetSig)
 				if verificationErr == nil {
 					log.Lvl4("Valid CBF set signature for node", r.ServerIdentity.Address)
@@ -545,7 +476,7 @@ func (p *SaveLocalState) AggregateCBF(locTree *AnonNode, reply []StructSaveReply
 			// filter containing only newZeros
 			if p.IsRoot() {
 				log.Lvl4("Final CBF before removing new zero vector", p.CountingBloomFilter.Set)
-				p.CountingBloomFilter.RemoveNewZero(byte(len(p.LocalTree.ListUniqueDataLeaves())))
+				p.CountingBloomFilter.RemoveNewZero(byte(len(listUniqueDataLeaves(p.LocalTree))))
 				log.Lvl4("Final CBF after removing new zero vector", p.CountingBloomFilter.Set)
 			}
 		}
@@ -634,7 +565,7 @@ func (p *SaveLocalState) generateRandomCBFs(param64 []uint64) (map[string]*Noise
 
 		// define constants
 		leaves := len(p.Roster().List) - 1
-		newZero := len(p.LocalTree.ListUniqueDataLeaves())
+		newZero := len(listUniqueDataLeaves(p.LocalTree))
 		maxUint := ^uint(0)
 		maxInt := int(maxUint >> 1)
 
@@ -739,42 +670,34 @@ func getRequestedMissingHash(p *SaveLocalState) string {
 	return missingHash
 }
 
-// BuildConsensusHtmlPage takes the p.MasterTree made of *AnonNode and combine
-// this data with the p.PlainNodes in order to create an *html.Node tree. Only
-// the leaves that appears in the combined Bloom filter more than threshold
-// times are included in the HTML page. All the other nodes are included by the
-// root.  The output is a valid HTML page there, it creates a valid html page
-// and outputs it.
+// BuildConsensusHtmlPage takes the p.LocalTree of the root  made of HTML nodes
+// and combine this data with the p.PlainNodes in order to create an *html.Node
+// tree. Only the leaves that appears in the combined Bloom filter more than
+// threshold times are included in the HTML page. All the other nodes are
+// included by the root.  The output is a valid HTML page there, it creates a
+// valid html page and outputs it.
 func (p *SaveLocalState) BuildConsensusHtmlPage() []byte {
 	log.Lvl4("Begin building consensus html page")
 	threshold := byte(p.Threshold)
 
-	anonRoot := p.LocalTree
-	var queue []*AnonNode
-	var curr *AnonNode
-	discovered := make(map[*AnonNode]*html.Node)
-	queue = append(queue, anonRoot)
-	for len(queue) != 0 {
-		curr = queue[0]
-		queue = queue[1:]
-		if _, ok := discovered[curr]; !ok {
-			html := p.PlainNodes[curr.HashedData]
-			if curr.FirstChild == nil { // it is a leaf
-				if p.CountingBloomFilter.Count([]byte(curr.HashedData))-byte(24) >= threshold {
-					discovered[curr] = &html
-				}
-			} else {
-				discovered[curr] = &html
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if n.FirstChild == nil { // it is a leaf
+			if p.CountingBloomFilter.Count([]byte(n.Data))-byte(24) < threshold {
+				n.Parent.RemoveChild(n)
 			}
-			for n := curr.FirstChild; n != nil; n = n.NextSibling {
-				queue = append(queue, n)
-			}
+
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
 		}
 	}
+	f(p.LocalTree)
 
 	// convert *html.Nodes tree to an html page
 	var page bytes.Buffer
-	err := html.Render(&page, discovered[anonRoot])
+	// we are sure that nodes[0] contains the root of the tree
+	err := html.Render(&page, p.LocalTree)
 	if err != nil {
 		return nil
 	}

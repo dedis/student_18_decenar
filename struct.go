@@ -8,8 +8,6 @@ import (
 	cosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/network"
-
-	"github.com/dedis/student_18_decenar/protocol"
 )
 
 // We need to register all messages so the network knows how to handle them.
@@ -83,8 +81,4 @@ type Webproof struct {
 	Sig       *cosiservice.SignatureResponse
 	Page      string
 	Timestamp string
-
-	RefTree []protocol.ExplicitNode
-	SeenMap map[string][]byte
-	SigMap  map[string][]byte
 }

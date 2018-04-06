@@ -5,12 +5,13 @@ import (
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"hash"
 	"math"
 	"math/big"
 
+	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/hkdf"
+	"golang.org/x/net/html"
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/util/random"
 	"gopkg.in/dedis/onet.v2/network"
@@ -30,7 +31,7 @@ type CBF struct {
 // optimal to store the unique leaves of the tree with the root given as
 // parameter of the function. Return nil if root is nil, this is used
 // to generalize the code in save.go and handle the additional data case
-func NewOptimalBloomFilter(root *AnonNode) *CBF {
+func NewOptimalBloomFilter(root *html.Node) *CBF {
 	if root == nil {
 		return &CBF{}
 	}
@@ -46,20 +47,20 @@ func NewBloomFilter(param []uint) *CBF {
 // GetOptimalCBFParametersToSend returns the optimal parameters, i.e. M and K,
 // for the tree rooted by root as []uint64 type. This is used to send the
 // parameters using protobuf
-func GetOptimalCBFParametersToSend(root *AnonNode) []uint64 {
+func GetOptimalCBFParametersToSend(root *html.Node) []uint64 {
 	p := getOptimalCBFParameters(root)
 	return []uint64{uint64(p[0]), uint64(p[1])}
 }
 
 // GetOptimalCBFParametersToSend returns the optimal parameters, i.e. M and K,
 // for the tree rooted by root as []uint type
-func getOptimalCBFParameters(root *AnonNode) []uint {
+func getOptimalCBFParameters(root *html.Node) []uint {
 	// TODO: check if this is the adapted zero value to return
 	if root == nil {
 		return []uint{0, 0}
 	}
-	uniqueLeaves := uint(len(root.ListUniqueDataLeaves()))
-	m, k := bestParameters(uniqueLeaves, 0.000001)
+	uniqueLeaves := uint(len(listUniqueDataLeaves(root)))
+	m, k := bestParameters(uniqueLeaves, 0.001)
 
 	return []uint{m, k}
 }
@@ -67,8 +68,8 @@ func getOptimalCBFParameters(root *AnonNode) []uint {
 // AddUniqueLeaves add to c the unique leaves contained
 // in the AnonTree with the root given as parameter
 // Return the CBF to allow chaining
-func (c *CBF) AddUniqueLeaves(root *AnonNode) *CBF {
-	uniqueLeaves := root.ListUniqueDataLeaves()
+func (c *CBF) AddUniqueLeaves(root *html.Node) *CBF {
+	uniqueLeaves := listUniqueDataLeaves(root)
 	for _, l := range uniqueLeaves {
 		c.Add([]byte(l))
 	}
@@ -79,7 +80,7 @@ func (c *CBF) AddUniqueLeaves(root *AnonNode) *CBF {
 // NewFilledBloomFilter create a new Bloom filter with the given parameters,
 // add the unique leaves contained in the AnonTree with the given root and
 // return the Bloom filter
-func NewFilledBloomFilter(param []uint, root *AnonNode) *CBF {
+func NewFilledBloomFilter(param []uint, root *html.Node) *CBF {
 	return NewBloomFilter(param).AddUniqueLeaves(root)
 }
 
@@ -246,10 +247,10 @@ func (c *CBF) ShuffleSet(s network.Suite) []byte {
 
 	maxUint := ^uint(0)
 	maxInt := int(maxUint >> 1)
-	shuffledSet := make([]byte, len(c.Set))
+	shuffledSet := c.Set
 	for i := len(c.Set) - 1; i > 0; i-- {
 		j := int(random.Int(big.NewInt(int64(maxInt)), s.RandomStream()).Int64()) % (i + 1)
-		shuffledSet[i], shuffledSet[j] = c.Set[j], c.Set[i]
+		shuffledSet[i], shuffledSet[j] = shuffledSet[j], shuffledSet[i]
 	}
 
 	return shuffledSet
@@ -277,28 +278,67 @@ func (c *CBF) GetSet() []byte {
 
 // hashes returns the four hash of e that are used to create
 // the k hash values
-func hashes(e []byte) [4]uint64 {
-	hasher := sha256.New()
-	sum := hasher.Sum(e)
-	h1 := binary.BigEndian.Uint64(sum[0:])
-	h2 := binary.BigEndian.Uint64(sum[8:])
-	h3 := binary.BigEndian.Uint64(sum[16:])
-	h4 := binary.BigEndian.Uint64(sum[24:])
-	return [4]uint64{h1, h2, h3, h4}
+func hashes(e []byte) [2]*big.Int {
+	sumSHA := sha256.Sum256(e)
+	a := new(big.Int)
+	a.SetBytes(sumSHA[:])
+	sumBlake := blake2b.Sum256(e)
+	b := new(big.Int)
+	b.SetBytes(sumBlake[:])
+
+	return [2]*big.Int{a, b}
+
 }
 
 // location returns the ith hashed location using the four base hash values
 // uses a slightly modified version of the double hashing scheme
 // see https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf
-func (c *CBF) location(h [4]uint64, i uint) uint {
-	return uint(h[i%4]+uint64(i)*h[(i+1)%4]) % c.M
+func (c *CBF) location(h [2]*big.Int, i uint) uint {
+	secondHash := new(big.Int)
+	sum := new(big.Int)
+	res := new(big.Int)
+	secondHash.Mul(big.NewInt(int64(i)), h[1])
+	sum.Add(h[0], secondHash)
+	res.Mod(sum, big.NewInt(int64(c.M)))
+
+	return uint(res.Uint64())
 }
 
 // bestParameters return an estimate of m and k given the number of elements n
 // that should be inserted in the set and fpRate, the desired false positive rate
 func bestParameters(n uint, fpRate float64) (uint, uint) {
 	m := uint(math.Ceil(-1 * float64(n) * math.Log(fpRate) / math.Pow(math.Log(2), 2)))
-	k := uint(math.Ceil(math.Log(2) * float64(m) / float64(n)))
+	k := uint(math.Ceil(math.Log(2) * float64(m) / (float64(n))))
 
 	return m, k
+}
+
+// listUniqueDataLeaves takes the root of an HTML tree as input and
+// outputs an array that contains all the unique leaves of the tree. To
+// define if a leaf is unique, the content of the leaf is taken into account.
+// The leaves data are ordered from the most right one to the most left one.
+//     Example:
+//                  R
+//                 /|\
+//     the tree   A D C   will output [F,D,E]
+//               / \   \
+//              D   E   F
+func listUniqueDataLeaves(root *html.Node) []string {
+	leaves := make([]string, 0)
+	discovered := make(map[string]bool)
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if n.FirstChild == nil { // it is a leaf
+			if !discovered[n.Data] {
+				discovered[n.Data] = true
+				leaves = append(leaves, n.Data)
+			}
+
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	f(root)
+	return leaves
 }
