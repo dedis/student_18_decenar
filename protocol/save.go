@@ -46,6 +46,7 @@ type SaveLocalState struct {
 	Url         string
 	ContentType string
 	Threshold   int32
+	NewZero     byte
 
 	LocalTree *html.Node
 
@@ -98,7 +99,7 @@ func (p *SaveLocalState) Start() error {
 	p.LocalTree = tree
 	p.MasterHash = hash
 	paramCBF := GetOptimalCBFParametersToSend(tree)
-	randomCBFs, err := p.generateRandomCBFs(paramCBF)
+	randomCBFs, err := p.generateNoise(paramCBF)
 	if err != nil {
 		log.Error("Error in save protocol Start():", err)
 		return err
@@ -157,7 +158,7 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		p.LocalTree = tree
 		p.MasterHash = msg.SaveAnnounce.MasterHash
 		p.ParametersCBF = castParametersCBF(msg.SaveAnnounce.ParametersCBF)
-		if !p.IsRoot() && msg.SaveAnnounce.NoiseForConodes != nil {
+		if msg.SaveAnnounce.NoiseForConodes != nil {
 			p.RandomEncryptedCBF = msg.SaveAnnounce.NoiseForConodes[p.Public().String()].EncryptedCBF
 		}
 		if !p.IsLeaf() {
@@ -476,7 +477,7 @@ func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveRepl
 			// filter containing only newZeros
 			if p.IsRoot() {
 				log.Lvl4("Final CBF before removing new zero vector", p.CountingBloomFilter.Set)
-				p.CountingBloomFilter.RemoveNewZero(byte(len(listUniqueDataLeaves(p.LocalTree))))
+				p.CountingBloomFilter.RemoveNewZero(p.NewZero)
 				log.Lvl4("Final CBF after removing new zero vector", p.CountingBloomFilter.Set)
 			}
 		}
@@ -547,10 +548,10 @@ func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Poin
 	}
 }
 
-// generateRandomCBFs generates random and encrypted CBFs for all the conodes,
+// generateNoise generates random and encrypted CBFs for all the conodes,
 // except root Return an error if the encryption of the random CBFs returns an
 // error
-func (p *SaveLocalState) generateRandomCBFs(param64 []uint64) (map[string]*Noise, error) {
+func (p *SaveLocalState) generateNoise(param64 []uint64) (map[string]*Noise, error) {
 	// this is used to make the code generic even when handling
 	// additional data, i.e. css and images
 	if p.LocalTree == nil {
@@ -564,32 +565,24 @@ func (p *SaveLocalState) generateRandomCBFs(param64 []uint64) (map[string]*Noise
 		randomEncryptedCBFs := make(map[string]*Noise)
 
 		// define constants
-		leaves := len(p.Roster().List) - 1
-		newZero := len(listUniqueDataLeaves(p.LocalTree))
-		maxUint := ^uint(0)
-		maxInt := int(maxUint >> 1)
+		conodes := len(p.Roster().List)
 
 		// allocate randomMatrix
-		randomMatrix := make([][]byte, leaves)
+		randomMatrix := make([][]byte, conodes)
 		for i := range randomMatrix {
 			randomMatrix[i] = make([]byte, param[0])
 		}
 
 		// fill random matrix
 		for i := uint(0); i < param[0]; i++ {
-			for k := 0; k < newZero; k++ {
-				bucket := int(random.Int(big.NewInt(int64(maxInt)), p.Suite().RandomStream()).Int64()) % leaves
+			for k := 0; k < int(p.NewZero); k++ {
+				bucket := int(random.Int(big.NewInt(int64(conodes)+1), p.Suite().RandomStream()).Int64()) - 1
 				randomMatrix[bucket][i]++
 			}
 		}
 
-		// create a random and encrypted CBF for all the conodes except for root
+		// create a random and encrypted CBF for all the conodes
 		for i, kp := range (p.Roster()).Publics() {
-			// skip root, note that we are sure that the roos
-			// is executing this function
-			if kp.Equal(p.TreeNode().ServerIdentity.Public) {
-				continue
-			}
 			// generate random counting Bloom filter
 			randomCBF := &CBF{Set: randomMatrix[i], M: param[0], K: param[1]}
 

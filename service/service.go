@@ -69,8 +69,9 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
 	}
 
-	// IMPROVEMENT threshold should be easily configurable
+	// IMPROVEMENT threshold and newZero should be easily configurable
 	threshold := int32(math.Ceil(float64(numNodes) * 0.8))
+	newZero := byte(2 * numNodes)
 
 	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
@@ -78,6 +79,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	}
 	pi.(*protocol.SaveLocalState).Url = req.Url
 	pi.(*protocol.SaveLocalState).Threshold = threshold
+	pi.(*protocol.SaveLocalState).NewZero = newZero
 	stattimes = append(stattimes, "saveProtoStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	go pi.Start()
 	// get result of consensus
