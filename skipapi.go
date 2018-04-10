@@ -26,7 +26,7 @@ type SkipClient struct {
 
 // NewClient instantiates a new decenarch.Client
 func NewSkipClient() *SkipClient {
-	return &SkipClient{Client: onet.NewClient(DecenarchSuite, SkipServiceName)}
+	return &SkipClient{Client: onet.NewClient(DecenarSuite, SkipServiceName)}
 }
 
 // SkipStart starts the infinite skipblocks creations loop on all the conodes.

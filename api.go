@@ -29,7 +29,7 @@ type Client struct {
 
 // NewClient instantiates a new decenarch.Client
 func NewClient() *Client {
-	return &Client{Client: onet.NewClient(DecenarchSuite, ServiceName)}
+	return &Client{Client: onet.NewClient(DecenarSuite, ServiceName)}
 }
 
 // Save will record the website requested in the conodes

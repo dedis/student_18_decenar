@@ -15,21 +15,20 @@ import (
 	"encoding/base64"
 	"errors"
 	"io/ioutil"
-	"math/big"
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
-	"strconv"
 
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/sign/schnorr"
-	"gopkg.in/dedis/kyber.v2/util/random"
 
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
 	"gopkg.in/dedis/onet.v2/network"
+
+	"github.com/dedis/student_18_decenar/lib"
 )
 
 func init() {
@@ -46,7 +45,7 @@ type SaveLocalState struct {
 	Url         string
 	ContentType string
 	Threshold   int32
-	NewZero     byte
+	SharedKey   kyber.Point
 
 	LocalTree *html.Node
 
@@ -55,9 +54,8 @@ type SaveLocalState struct {
 	PlainData map[string][]byte
 
 	ParametersCBF       []uint
-	RandomEncryptedCBF  []byte
-	ShuffledCBFSet      []byte
-	CountingBloomFilter *CBF
+	CountingBloomFilter *lib.CBF
+	EncryptedCBFSet     *lib.CipherVector
 
 	MsgToSign         chan []byte
 	StringChan        chan string
@@ -96,26 +94,20 @@ func (p *SaveLocalState) Start() error {
 	}
 	p.LocalTree = tree
 	p.MasterHash = hash
-	paramCBF := GetOptimalCBFParametersToSend(tree)
-	randomCBFs, err := p.generateNoise(paramCBF)
-	if err != nil {
-		log.Error("Error in save protocol Start():", err)
-		return err
-	}
+	paramCBF := lib.GetOptimalCBFParametersToSend(tree)
 	// send useful information to the service
-	// TODO: mybe move this to compute all only one time
 	if p.LocalTree != nil {
 		p.ParametersCBFChan <- castParametersCBF(paramCBF)
-		p.StringChan <- strconv.Itoa(len(listUniqueDataLeaves(tree)))
+		// TODO: put again
+		//p.StringChan <- strconv.Itoa(len(lib.listUniqueDataLeaves(tree)))
 	}
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
 		SaveAnnounce{
-			Url:             p.Url,
-			Phase:           Consensus,
-			MasterHash:      p.MasterHash,
-			ParametersCBF:   paramCBF,
-			NoiseForConodes: randomCBFs,
+			Url:           p.Url,
+			Phase:         Consensus,
+			MasterHash:    p.MasterHash,
+			ParametersCBF: paramCBF,
 		},
 	})
 }
@@ -156,9 +148,6 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		p.LocalTree = tree
 		p.MasterHash = msg.SaveAnnounce.MasterHash
 		p.ParametersCBF = castParametersCBF(msg.SaveAnnounce.ParametersCBF)
-		if msg.SaveAnnounce.NoiseForConodes != nil {
-			p.RandomEncryptedCBF = msg.SaveAnnounce.NoiseForConodes[p.Public().String()].EncryptedCBF
-		}
 		if !p.IsLeaf() {
 			return p.SendToChildren(&msg.SaveAnnounce)
 		} else {
@@ -275,9 +264,8 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 
 				Errs: p.Errs,
 
-				NoisyCBFSet:    p.CountingBloomFilter.GetSet(),
-				ShuffledCBFSet: p.ShuffledCBFSet,
-				CBFSetSig:      CBFSetSig,
+				EncryptedCBFSet: p.EncryptedCBFSet,
+				CBFSetSig:       CBFSetSig,
 			}
 			return p.SendToParent(&resp)
 		}
@@ -439,44 +427,18 @@ func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveRepl
 	if p.LocalTree != nil {
 		param := p.ParametersCBF
 		// fill filter with local data
-		p.CountingBloomFilter = NewFilledBloomFilter(param, locTree)
-		log.Lvl4("Filled CBF for node", p.ServerIdentity().Address,
-			"is", p.CountingBloomFilter)
-		// publish shuffeled set of the local Bloom filter
-		p.ShuffledCBFSet = p.CountingBloomFilter.ShuffleSet(p.Suite())
-		if !p.IsRoot() {
-			// decrypt random vector, where the public key is the root public key
-			randomCBF, err := Decrypt(p.Suite(), p.Private(), p.Root().ServerIdentity.Public, p.RandomEncryptedCBF, param)
-			if err != nil {
-				log.Lvl1("Error while decrypting the randomCBF for node", p.ServerIdentity().Address, ":", err)
-				return err
-			}
-			log.Lvl4("Random CBF for node", p.ServerIdentity(), "is", randomCBF)
+		p.CountingBloomFilter = lib.NewFilledBloomFilter(param, locTree)
+		log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 
-			// merge random CBF with local CBF
-			p.CountingBloomFilter.Merge(randomCBF)
-			log.Lvl4("Result of merging local CBF and random CBF for node",
-				p.ServerIdentity().Address, "is", p.CountingBloomFilter)
-		}
+		// encrypt set of the filter using the collective DKG key
+		p.EncryptedCBFSet = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+
+		// aggregate children contributions after checking the signature
 		if !p.IsLeaf() {
-			// aggregate all the children's reply
 			for _, r := range reply {
-				verificationErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, r.NoisyCBFSet, r.CBFSetSig)
-				if verificationErr == nil {
-					log.Lvl4("Valid CBF set signature for node", r.ServerIdentity.Address)
-					p.CountingBloomFilter.MergeSet(r.NoisyCBFSet)
-				} else {
-					log.Lvl1("Invalid signature for node", r.ServerIdentity.Address)
-					p.Errs = append(p.Errs, verificationErr)
-				}
-			}
+				// TODO: verify signature
+				p.EncryptedCBFSet.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
 
-			// remove newZero vector from final CBF. Only root is supposed to remove the
-			// filter containing only newZeros
-			if p.IsRoot() {
-				log.Lvl4("Final CBF before removing new zero vector", p.CountingBloomFilter.Set)
-				p.CountingBloomFilter.RemoveNewZero(p.NewZero)
-				log.Lvl4("Final CBF after removing new zero vector", p.CountingBloomFilter.Set)
 			}
 		}
 	}
@@ -484,6 +446,7 @@ func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveRepl
 	return nil
 }
 
+// TODO: CHANGE SIGNATURE VERIFICATION FUNCTION BECAUSE NOW I ADDED AN HASH
 // signCBFSet sign the set of the counting Bloom filter with the private key of
 // the node represented by p. An error is returnd an error occur during the
 // signing process.
@@ -491,14 +454,19 @@ func (p *SaveLocalState) signCBFSet() ([]byte, error) {
 	if p.CountingBloomFilter == nil {
 		return []byte(""), nil
 	}
-	set := p.CountingBloomFilter.Set
-	sig, err := schnorr.Sign(p.Suite(), p.Private(), set)
+
+	gob, err := p.CountingBloomFilter.Encode()
+	if err != nil {
+		return nil, err
+	}
+	setHash := p.Suite().(kyber.HashFactory).Hash().Sum(gob)
+	sig, err := schnorr.Sign(p.Suite(), p.Private(), setHash)
 	if err != nil {
 		log.Lvl1("Error! Impossible to sign CBF set", err)
 		p.Errs = append(p.Errs, err)
 		return nil, err
 	}
-	log.Lvl4("CBF set", set, "for node", p.ServerIdentity().Address,
+	log.Lvl4("CBF set", p.CountingBloomFilter.Set, "for node", p.ServerIdentity().Address,
 		"signed with signature", sig)
 	return sig, nil
 }
@@ -544,63 +512,6 @@ func (p *SaveLocalState) AggregateUnstructData(locHash map[string]map[kyber.Poin
 			}
 		}
 	}
-}
-
-// generateNoise generates random and encrypted CBFs for all the conodes,
-// except root Return an error if the encryption of the random CBFs returns an
-// error
-func (p *SaveLocalState) generateNoise(param64 []uint64) (map[string]*Noise, error) {
-	// this is used to make the code generic even when handling
-	// additional data, i.e. css and images
-	if p.LocalTree == nil {
-		return nil, nil
-	}
-
-	if p.IsRoot() {
-		// cast param to uint
-		param := []uint{uint(param64[0]), uint(param64[1])}
-		// allocate maps
-		randomEncryptedCBFs := make(map[string]*Noise)
-
-		// define constants
-		conodes := len(p.Roster().List)
-
-		// allocate randomMatrix
-		randomMatrix := make([][]byte, conodes)
-		for i := range randomMatrix {
-			randomMatrix[i] = make([]byte, param[0])
-		}
-
-		// fill random matrix
-		for i := uint(0); i < param[0]; i++ {
-			for k := 0; k < int(p.NewZero); k++ {
-				bucket := int(random.Int(big.NewInt(int64(conodes)+1), p.Suite().RandomStream()).Int64()) - 1
-				randomMatrix[bucket][i]++
-			}
-		}
-
-		// create a random and encrypted CBF for all the conodes
-		for i, kp := range (p.Roster()).Publics() {
-			// generate random counting Bloom filter
-			randomCBF := &CBF{Set: randomMatrix[i], M: param[0], K: param[1]}
-
-			// compute sum of the set of the random Bloom filter
-			sum := randomCBF.Sum()
-
-			// encrypt the CBF using DH to seed AES
-			encodedCipherText, err := randomCBF.Encrypt(p.Suite(), p.Private(), kp)
-			if err != nil {
-				return nil, err
-			}
-
-			// encode the ciphertext and add to the map
-			randomEncryptedCBFs[kp.String()] = &Noise{EncryptedCBF: encodedCipherText, CBFSum: sum}
-		}
-
-		return randomEncryptedCBFs, nil
-	}
-
-	return nil, errors.New("Only root should generate the random encrypted counting Bloom filters")
 }
 
 // getMostSignedHash returns a new map containing only the entry of the map
@@ -669,14 +580,14 @@ func getRequestedMissingHash(p *SaveLocalState) string {
 // valid html page and outputs it.
 func (p *SaveLocalState) BuildConsensusHtmlPage() []byte {
 	log.Lvl4("Begin building consensus html page")
-	threshold := byte(p.Threshold)
+	//threshold := byte(p.Threshold)
 
 	var f func(*html.Node)
 	f = func(n *html.Node) {
 		if n.FirstChild == nil { // it is a leaf
-			if p.CountingBloomFilter.Count([]byte(n.Data))-byte(24) < threshold {
-				n.Parent.RemoveChild(n)
-			}
+			//if p.CountingBloomFilter.Count([]byte(n.Data))-byte(24) < threshold {
+			//		n.Parent.RemoveChild(n)
+			//	}
 
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {

@@ -1,3 +1,4 @@
+// TODO: review doc
 /*
 Package protocol contains the functions and structure related to the save and
 retrieve protocol of the decenarch service.

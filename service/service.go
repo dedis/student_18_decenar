@@ -18,8 +18,10 @@ import (
 	urlpkg "net/url"
 
 	"github.com/dedis/student_18_decenar"
+	"github.com/dedis/student_18_decenar/lib"
 	"github.com/dedis/student_18_decenar/protocol"
 	"golang.org/x/net/html"
+	"gopkg.in/dedis/kyber.v2"
 
 	cosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
 
@@ -31,6 +33,9 @@ import (
 
 // Used for tests
 var templateID onet.ServiceID
+
+// timeout for protocol termination.
+const timeout = 60 * time.Minute
 
 func init() {
 	var err error
@@ -63,20 +68,38 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	log.Lvl3("Decenarch Service new SaveRequest")
 	numNodes := len(req.Roster.List)
-	// TODO: this is used only for testing, use GenerateBinaryTree for real application
-	tree := req.Roster.GenerateNaryTreeWithRoot(1, s.ServerIdentity())
+	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
+	tree := root.GenerateNaryTree(numNodes)
+	fmt.Printf("Tree informations %v\n", tree.Dump())
 	if tree == nil {
 		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
 	}
 
+	// run DKG protocol
+	DKGInstance, _ := s.CreateProtocol(protocol.NameDKG, tree)
+	DKGProtocol := DKGInstance.(*protocol.SetupDKG)
+
+	if err := DKGProtocol.Start(); err != nil {
+		return nil, err
+	}
+	var key kyber.Point
+	select {
+	case <-DKGProtocol.Done:
+		secret, _ := lib.NewSharedSecret(DKGProtocol.DKG)
+		key = secret.X
+
+	case <-time.After(timeout):
+		return nil, errors.New("open error, protocol timeout")
+	}
+
 	// IMPROVEMENT threshold and newZero should be easily configurable
 	threshold := int32(math.Ceil(float64(numNodes) * 0.8))
-	newZero := byte(2 * numNodes)
 
 	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
 		return nil, err
 	}
+	pi.(*protocol.SaveLocalState).SharedKey = key
 	pi.(*protocol.SaveLocalState).Url = req.Url
 	pi.(*protocol.SaveLocalState).Threshold = threshold
 	pi.(*protocol.SaveLocalState).NewZero = newZero
@@ -85,7 +108,9 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	// get result of consensus
 	log.Lvl4("Waiting for protocol data...")
 	var parametersCBF []uint = <-pi.(*protocol.SaveLocalState).ParametersCBFChan
-	var uniqueLeaves string = <-pi.(*protocol.SaveLocalState).StringChan
+	//var uniqueLeaves string = <-pi.(*protocol.SaveLocalState).StringChan
+	// TODO: change again
+	var uniqueLeaves string = "0"
 	var realUrl string = <-pi.(*protocol.SaveLocalState).StringChan
 	var contentType string = <-pi.(*protocol.SaveLocalState).StringChan
 	var msgToSign []byte = <-pi.(*protocol.SaveLocalState).MsgToSign

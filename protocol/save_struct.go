@@ -8,6 +8,7 @@ so that it can find out who sent the message.
 */
 
 import (
+	"github.com/dedis/student_18_decenar/lib"
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/kyber.v2"
@@ -45,11 +46,10 @@ const (
 //				encrypted for each conode using a DH shared secret. Note
 //				that the CBF of the root is not encrypted.
 type SaveAnnounce struct {
-	Phase           SavePhase
-	Url             string
-	MasterHash      map[string]map[kyber.Point][]byte
-	ParametersCBF   []uint64
-	NoiseForConodes map[string]*Noise
+	Phase         SavePhase
+	Url           string
+	MasterHash    map[string]map[kyber.Point][]byte
+	ParametersCBF []uint64
 }
 
 type Noise struct {
@@ -96,9 +96,8 @@ type SaveReply struct {
 	RequestedNode map[string]html.Node
 	RequestedData map[string][]byte
 
-	NoisyCBFSet    []byte
-	ShuffledCBFSet []byte
-	CBFSetSig      []byte
+	EncryptedCBFSet *lib.CipherVector
+	CBFSetSig       []byte
 }
 
 // StructSaveReply just contains StructSaveReply and the data necessary to
