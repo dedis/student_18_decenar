@@ -106,12 +106,11 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		AddsUrl:     make([]string, 0),
 		Timestamp:   mainTimestamp,
 	}
-	//proofwebmain := decenarch.Webproof{
-	//	Url:       realUrl,
-	//	Sig:       sig,
-	//	Page:      base64.StdEncoding.EncodeToString(msgToSign),
-	//	Timestamp: mainTimestamp,
-	//}
+	proof := &decenarch.GeneralProof{
+		Url:       realUrl,
+		CoSig:     sig,
+		Timestamp: mainTimestamp,
+	}
 	log.Lvl4("Create stored request")
 	// consensus protocol for all additional ressources
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
@@ -157,7 +156,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "uniqueLeaves;"+uniqueLeaves)
 	stattimes = append(stattimes, "mCBF;"+strconv.Itoa(int(parametersCBF[0])))
 	stattimes = append(stattimes, "kCBF;"+strconv.Itoa(int(parametersCBF[1])))
-	resp := &decenarch.SaveResponse{Times: stattimes}
+	resp := &decenarch.SaveResponse{Times: stattimes, Proof: proof}
 	return resp, nil
 }
 

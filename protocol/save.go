@@ -52,8 +52,7 @@ type SaveLocalState struct {
 
 	MasterHash map[string]map[kyber.Point][]byte
 
-	PlainNodes map[string]html.Node
-	PlainData  map[string][]byte
+	PlainData map[string][]byte
 
 	ParametersCBF       []uint
 	RandomEncryptedCBF  []byte
@@ -72,7 +71,6 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		TreeNodeInstance:  n,
 		Url:               "",
 		Phase:             NilPhase,
-		PlainNodes:        make(map[string]html.Node),
 		PlainData:         make(map[string][]byte),
 		MsgToSign:         make(chan []byte),
 		StringChan:        make(chan string),
@@ -663,9 +661,9 @@ func getRequestedMissingHash(p *SaveLocalState) string {
 	return missingHash
 }
 
-// BuildConsensusHtmlPage takes the p.LocalTree of the root  made of HTML nodes
-// and combine this data with the p.PlainNodes in order to create an *html.Node
-// tree. Only the leaves that appears in the combined Bloom filter more than
+// BuildConsensusHtmlPage takes the p.LocalTree of the root made of HTML nodes
+// and returns the consensus HTML page coming from the consensus HTML tree.
+// Only the leaves that appears in the combined Bloom filter more than
 // threshold times are included in the HTML page. All the other nodes are
 // included by the root.  The output is a valid HTML page there, it creates a
 // valid html page and outputs it.

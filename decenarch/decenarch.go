@@ -153,7 +153,8 @@ func cmdSave(c *cli.Context) error {
 	}
 	log.Info("Website", url, "saved.", resp)
 	if c.Bool("proof") {
-		fmt.Println("Show the proof here")
+		fmt.Println("Proof of the consensu algorithm")
+		fmt.Printf("%+v\n", resp.Proof)
 	}
 	return nil
 }
@@ -230,7 +231,7 @@ func getFolderAndFilePath(url string) (string, string, error) {
 	return folderPath, filePath, nil
 }
 
-//  changeImgSrc iterates over the entire HTML document and changes
+// changeImgSrc iterates over the entire HTML document and changes
 // the sources of the images to use the images stored on disk
 // when retrieving a web page with deceanrch
 func changeImgSrc(bData []byte, url string) ([]byte, error) {
@@ -256,6 +257,9 @@ func changeImgSrc(bData []byte, url string) ([]byte, error) {
 	return b.Bytes(), err
 }
 
+// changeNodeImgSrc is an helper function of changeImgSrc and it changes the
+// source of a given HTML node from internet address to local address, if
+// needed
 func changeNodeImgSrc(n *html.Node, url string) error {
 	var err error
 	if n.Type == html.ElementNode && n.Data == "img" {

@@ -256,6 +256,21 @@ func (c *CBF) ShuffleSet(s network.Suite) []byte {
 	return shuffledSet
 }
 
+func (c *CBF) Verify(numberLeaves int) bool {
+	// verify correct number of elements
+	sum := 0
+	for _, counter := range c.Set {
+		sum += int(counter)
+	}
+	if sum/int(c.K) != numberLeaves {
+		return false
+	}
+	// verify that a given counter does not exceed a reasonable value. This
+	// value is computed using statistical informations about the CBF and
+	// some empirical results, as explained in the report
+	return true
+}
+
 func (c *CBF) getParameters() []uint {
 	return []uint{c.M, c.K}
 }
