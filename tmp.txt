@@ -1,0 +1,21 @@
+
+		fmt.Printf("Partials: %#v\n", d.Partials)
+		// root is the last node that decrypts its own partial, so here we can reconstruct
+		// the original ciphertext vector
+		points := make([]kyber.Point, 0)
+		n := len(d.Tree().List())
+		for i := 0; i < len(d.Partials[0]); i++ {
+			shares := make([]*share.PubShare, n)
+			for j, partial := range d.Partials {
+				shares[j] = &share.PubShare{I: j, V: partial[i]}
+				fmt.Printf("Share: %#v\n", shares[j])
+			}
+			message, err := share.RecoverCommit(cothority.Suite, shares, n, n)
+			fmt.Printf("Err %#v\n", err)
+			points = append(points, message)
+		}
+		reconstructed := make([]int64, 0)
+		for _, point := range points {
+			reconstructed = append(reconstructed, lib.GetPointToInt(point))
+		}
+		return d.SendTo(d.Root(), &TerminateDecrypt{})

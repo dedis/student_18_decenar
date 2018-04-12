@@ -60,6 +60,7 @@ type SaveLocalState struct {
 	MsgToSign         chan []byte
 	StringChan        chan string
 	ParametersCBFChan chan []uint
+	ConsensusCBF      chan *lib.CipherVector
 }
 
 // NewSaveProtocol initialises the structure for use in one round
@@ -73,6 +74,7 @@ func NewSaveProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		MsgToSign:         make(chan []byte),
 		StringChan:        make(chan string),
 		ParametersCBFChan: make(chan []uint),
+		ConsensusCBF:      make(chan *lib.CipherVector),
 	}
 	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
 		if err := t.RegisterHandler(handler); err != nil {
@@ -290,6 +292,7 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 
 			if p.LocalTree != nil {
 				p.MsgToSign <- p.BuildConsensusHtmlPage()
+				p.ConsensusCBF <- p.EncryptedCBFSet
 			} else if p.MasterHash != nil && len(p.MasterHash) > 0 {
 				p.MsgToSign <- p.PlainData[requestedHash]
 			}

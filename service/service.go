@@ -57,8 +57,14 @@ type Service struct {
 // than one structure.
 var storageID = []byte("main")
 
+type Partial struct {
+	Points []kyber.Point
+}
+
 type storage struct {
 	sync.Mutex
+	Secret   *lib.SharedSecret
+	Partials map[int]*Partial
 }
 
 // SaveRequest is the function called by the service when a client want to save a website in the
@@ -83,10 +89,15 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		return nil, err
 	}
 	var key kyber.Point
+	var secret *lib.SharedSecret
 	select {
 	case <-DKGProtocol.Done:
-		secret, _ := lib.NewSharedSecret(DKGProtocol.DKG)
+		secret, _ = lib.NewSharedSecret(DKGProtocol.DKG)
 		key = secret.X
+		s.storage.Lock()
+		s.storage.Secret = secret
+		s.storage.Unlock()
+		s.save()
 
 	case <-time.After(timeout):
 		return nil, errors.New("open error, protocol timeout")
@@ -102,7 +113,6 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	pi.(*protocol.SaveLocalState).SharedKey = key
 	pi.(*protocol.SaveLocalState).Url = req.Url
 	pi.(*protocol.SaveLocalState).Threshold = threshold
-	pi.(*protocol.SaveLocalState).NewZero = newZero
 	stattimes = append(stattimes, "saveProtoStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	go pi.Start()
 	// get result of consensus
@@ -136,6 +146,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		CoSig:     sig,
 		Timestamp: mainTimestamp,
 	}
+	var consensusCBF *lib.CipherVector = <-pi.(*protocol.SaveLocalState).ConsensusCBF
 	log.Lvl4("Create stored request")
 	// consensus protocol for all additional ressources
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
@@ -171,6 +182,27 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		}
 	}
 	webadds = append(webadds, webmain)
+
+	// run decrypt protocol
+	instanceDecrypt, _ := s.CreateProtocol(protocol.NameDecrypt, tree)
+	protocolDecrypt := instanceDecrypt.(*protocol.Decrypt)
+	instanceDecrypt.(*protocol.Decrypt).EncryptedCBFSet = consensusCBF
+	instanceDecrypt.(*protocol.Decrypt).Secret = s.storage.Secret
+	if err := protocolDecrypt.Start(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-protocolDecrypt.Finished:
+		fmt.Println("Decrypt finished")
+		s.storage.Lock()
+		s.storage.Partials[tree.Root.RosterIndex] = &Partial{protocolDecrypt.Partials}
+		s.storage.Unlock()
+		s.save()
+
+	case <-time.After(timeout):
+		return nil, errors.New("decrypt error, protocol timeout")
+	}
+
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := decenarch.NewSkipClient()
 	stattimes = append(stattimes, "skipAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
@@ -246,9 +278,42 @@ func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.Re
 // instantiate the protocol on its own. If you need more control at the
 // instantiation of the protocol, use CreateProtocolService, and you can
 // give some extra-configuration to your protocol in here.
-func (s *Service) NewProtocol(tn *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
+func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericConfig) (onet.ProtocolInstance, error) {
 	log.Lvl3("Decenarch Service new protocol event")
-	return nil, nil
+	switch node.ProtocolName() {
+	case protocol.NameDKG:
+		instance, _ := protocol.NewSetupDKG(node)
+		protocol := instance.(*protocol.SetupDKG)
+		go func() {
+			<-protocol.Done
+			secret, _ := lib.NewSharedSecret(protocol.DKG)
+			s.storage.Lock()
+			s.storage.Secret = secret
+			s.storage.Unlock()
+			s.save()
+		}()
+		return protocol, nil
+	case protocol.SaveName:
+		instance, _ := protocol.NewSaveProtocol(node)
+		protocol := instance.(*protocol.SaveLocalState)
+		return protocol, nil
+	case protocol.NameDecrypt:
+		instance, _ := protocol.NewDecrypt(node)
+		protocol := instance.(*protocol.Decrypt)
+		s.storage.Lock()
+		protocol.Secret = s.storage.Secret
+		s.storage.Unlock()
+		go func() {
+			<-protocol.Finished
+			s.storage.Lock()
+			s.storage.Partials[node.Index()] = &Partial{protocol.Partials}
+			s.storage.Unlock()
+			s.save()
+		}()
+		return protocol, nil
+	default:
+		return nil, errors.New("protocol error, unknown protocol")
+	}
 }
 
 // saves all skipblocks.
@@ -264,7 +329,9 @@ func (s *Service) save() {
 // Tries to load the configuration and updates the data in the service
 // if it finds a valid config-file.
 func (s *Service) tryLoad() error {
-	s.storage = &storage{}
+	s.storage.Lock()
+	defer s.storage.Unlock()
+
 	msg, err := s.Load(storageID)
 	if err != nil {
 		return err
@@ -286,13 +353,16 @@ func (s *Service) tryLoad() error {
 func newService(c *onet.Context) (onet.Service, error) {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
+		storage:          &storage{Partials: make(map[int]*Partial)},
 	}
+	fmt.Printf("Storage %#v\n", s.storage.Partials)
 	if err := s.RegisterHandlers(s.SaveRequest, s.RetrieveRequest); err != nil {
 		log.Error(err, "Couldn't register messages")
 		return nil, err
 	}
 	if err := s.tryLoad(); err != nil {
 		log.Error(err)
+		return nil, err
 	}
 	return s, nil
 }

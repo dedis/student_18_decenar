@@ -167,6 +167,16 @@ func DecryptIntVector(prikey kyber.Scalar, cipherVector *CipherVector) []int64 {
 	return result
 }
 
+// PartiallyDecryptIntVector decrypts a cipherVector.
+func PartiallyDecryptIntVector(prikey kyber.Scalar, cipherVector *CipherVector) *CipherVector {
+	result := make(CipherVector, (len(*cipherVector)))
+	for i, c := range *cipherVector {
+		result[i].K = c.K // randomness remains the same
+		result[i].C = decryptPoint(prikey, c)
+	}
+	return &result
+}
+
 // DecryptInt decrypts an integer from an ElGamal cipher text where integer are encoded in the exponent.
 func DecryptCheckZero(prikey kyber.Scalar, cipher CipherText) int64 {
 	M := decryptPoint(prikey, cipher)
@@ -184,6 +194,10 @@ func DecryptCheckZeroVector(prikey kyber.Scalar, cipherVector *CipherVector) []i
 		result[i] = DecryptCheckZero(prikey, c)
 	}
 	return result
+}
+
+func GetPointToInt(P kyber.Point) int64 {
+	return discreteLog(P, false)
 }
 
 // Brute-Forces the discrete log for integer decoding.
