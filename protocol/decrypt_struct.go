@@ -18,16 +18,6 @@ type MessagePromptDecrypt struct {
 	PromptDecrypt
 }
 
-// TerminateDecrypt is sent by the leaf node to the root node upon completion of
-// the last partial decryption, which terminates the protocol.
-type TerminateDecrypt struct{}
-
-// MessageTerminateDecrypt is a wrapper around TerminateDecrypt.
-type MessageTerminateDecrypt struct {
-	*onet.TreeNode
-	TerminateDecrypt
-}
-
 type SendPartial struct {
 	Partial []kyber.Point
 }

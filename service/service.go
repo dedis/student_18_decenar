@@ -37,7 +37,7 @@ import (
 var serviceID onet.ServiceID
 
 // timeout for protocol termination.
-const timeout = 60 * time.Minute
+const timeout = 1 * time.Minute
 
 func init() {
 	var err error
@@ -154,11 +154,6 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		AddsUrl:     make([]string, 0),
 		Timestamp:   mainTimestamp,
 	}
-	proof := &decenarch.GeneralProof{
-		Url:       realUrl,
-		CoSig:     sig,
-		Timestamp: mainTimestamp,
-	}
 	var consensusCBF *lib.CipherVector = <-pi.(*protocol.SaveLocalState).ConsensusCBF
 	log.Lvl4("Create stored request")
 
@@ -198,21 +193,13 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	webadds = append(webadds, webmain)
 
 	// run decrypt protocol
-	instanceDecrypt, _ := s.CreateProtocol(protocol.NameDecrypt, tree)
-	protocolDecrypt := instanceDecrypt.(*protocol.Decrypt)
-	instanceDecrypt.(*protocol.Decrypt).EncryptedCBFSet = consensusCBF
-	instanceDecrypt.(*protocol.Decrypt).Secret = s.secret()
-	if err := protocolDecrypt.Start(); err != nil {
+	partials, err := s.decrypt(tree, consensusCBF)
+	if err != nil {
 		return nil, err
 	}
-	select {
-	case <-protocolDecrypt.Finished:
-	case <-time.After(timeout):
-		return nil, errors.New("decrypt error, protocol timeout")
-	}
 
-	partials := protocolDecrypt.Partials
-	s.Reconstruct(partials)
+	// reconstruct parials
+	fmt.Printf("Reconstructed: %#v\n", s.reconstruct(partials))
 
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := decenarch.NewSkipClient()
@@ -224,25 +211,30 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "uniqueLeaves;"+uniqueLeaves)
 	stattimes = append(stattimes, "mCBF;"+strconv.Itoa(int(parametersCBF[0])))
 	stattimes = append(stattimes, "kCBF;"+strconv.Itoa(int(parametersCBF[1])))
-	resp := &decenarch.SaveResponse{Times: stattimes, Proof: proof}
+	resp := &decenarch.SaveResponse{Times: stattimes}
 	return resp, nil
 }
 
-// secret returns the shared secret for a given election.
-func (s *Service) secret() *lib.SharedSecret {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.Secret
+func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[int][]kyber.Point, error) {
+	pi, err := s.CreateProtocol(protocol.NameDecrypt, t)
+	if err != nil {
+		return nil, err
+	}
+	p := pi.(*protocol.Decrypt)
+	pi.(*protocol.Decrypt).EncryptedCBFSet = encryptedCBFSet
+	pi.(*protocol.Decrypt).Secret = s.secret()
+	if err := p.Start(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-p.Finished:
+		return p.Partials, nil
+	case <-time.After(timeout):
+		return nil, errors.New("decrypt error, protocol timeout")
+	}
 }
 
-// key returns the key given by DKG
-func (s *Service) key() kyber.Point {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.Key
-}
-
-func (s *Service) Reconstruct(partials map[int][]kyber.Point) {
+func (s *Service) reconstruct(partials map[int][]kyber.Point) []int64 {
 	points := make([]kyber.Point, 0)
 	n := 3
 	for i := 0; i < len(partials[0]); i++ {
@@ -253,16 +245,18 @@ func (s *Service) Reconstruct(partials map[int][]kyber.Point) {
 		message, _ := share.RecoverCommit(cothority.Suite, shares, n, n)
 		points = append(points, message)
 	}
+
+	// reconstruct the points using by computing the dlog
 	reconstructed := make([]int64, 0)
 	for _, point := range points {
 		reconstructed = append(reconstructed, lib.GetPointToInt(point))
 	}
-	fmt.Println("I'm there")
-	fmt.Printf("Reconstructed %#v\n", reconstructed)
+
+	return reconstructed
 }
 
-// RetrieveRequest
-func (s *Service) RetrieveRequest(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, error) {
+// Retrieve returns the webpage retrieved from the skipchain
+func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveResponse, error) {
 	log.Lvl3("Decenarch Service new RetrieveRequest:", req)
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
@@ -359,6 +353,20 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 	}
 }
 
+// secret returns the shared secret for a given election.
+func (s *Service) secret() *lib.SharedSecret {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.Secret
+}
+
+// key returns the key given by DKG
+func (s *Service) key() kyber.Point {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.Key
+}
+
 // saves all skipblocks.
 func (s *Service) save() {
 	log.Lvl3(s.String(), "Saving Service")
@@ -399,14 +407,14 @@ func newService(c *onet.Context) (onet.Service, error) {
 		ServiceProcessor: onet.NewServiceProcessor(c),
 		storage:          &storage{Partials: make(map[int][]kyber.Point)},
 	}
-	if err := s.RegisterHandlers(s.SaveWebpage, s.RetrieveRequest, s.Setup); err != nil {
+	if err := s.RegisterHandlers(s.SaveWebpage, s.Retrieve, s.Setup); err != nil {
 		log.Error(err, "Couldn't register messages")
 		return nil, err
 	}
-	//if err := s.tryLoad(); err != nil {
-	//		log.Error(err)
-	//		return nil, err
-	//	}
+	if err := s.tryLoad(); err != nil {
+		log.Error(err)
+		return nil, err
+	}
 	return s, nil
 }
 

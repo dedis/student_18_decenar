@@ -167,7 +167,6 @@ func cmdSkipStart(c *cli.Context) error {
 	// start the skipchain
 	client := decenarch.NewSkipClient()
 	resp, err := client.SkipStart(group.Roster)
-	fmt.Println("Qui ci sono")
 	if err != nil {
 		log.Fatal("When asking to start skipchain", err)
 	}
@@ -191,7 +190,8 @@ func cmdStart(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	time.Sleep(10 * time.Second)
+	// give some time to the skipchain for starting
+	time.Sleep(1 * time.Second)
 	err = cmdDKGStart(c)
 	if err != nil {
 		return err

@@ -210,7 +210,7 @@ func discreteLog(P kyber.Point, checkNeg bool) int64 {
 	if ok == nil && object != nil {
 		return object.(int64)
 	}
-	//mutex.Lock()
+	mutex.Lock()
 	if currentGreatestInt == 0 {
 		currentGreatestM = SuiTe.Point().Null()
 	}
@@ -232,53 +232,12 @@ func discreteLog(P kyber.Point, checkNeg bool) int64 {
 	if m == MaxHomomorphicInt {
 		return 0
 	}
-	//mutex.Unlock()
+	mutex.Unlock()
 
 	if SuiTe.Point().Neg(Bi).Equal(P) {
 		return -m
 	}
 	return m
-}
-
-// ReplaceContribution computes the new CipherText with the old mask contribution replaced by new and save in receiver.
-func (c *CipherText) ReplaceContribution(cipher CipherText, old, new kyber.Point) {
-	c.C.Sub(cipher.C, old)
-	c.C.Add(c.C, new)
-}
-
-// KeySwitching performs one step in the Key switching process and stores result in receiver.
-func (c *CipherText) KeySwitching(cipher CipherText, originalEphemeralKey, newKey kyber.Point, private kyber.Scalar) kyber.Scalar {
-	r := SuiTe.Scalar().Pick(random.New())
-	oldContrib := SuiTe.Point().Mul(private, originalEphemeralKey)
-	newContrib := SuiTe.Point().Mul(r, newKey)
-	ephemContrib := SuiTe.Point().Mul(r, SuiTe.Point().Base())
-	c.ReplaceContribution(cipher, oldContrib, newContrib)
-	c.K.Add(cipher.K, ephemContrib)
-	return r
-}
-
-// KeySwitching performs one step in the Key switching process on a vector and stores result in receiver.
-func (cv *CipherVector) KeySwitching(cipher CipherVector, originalEphemeralKeys []kyber.Point, newKey kyber.Point, private kyber.Scalar) []kyber.Scalar {
-	r := make([]kyber.Scalar, len(*cv))
-	var wg sync.WaitGroup
-	if PARALLELIZE {
-		for i := 0; i < len(cipher); i = i + VPARALLELIZE {
-			wg.Add(1)
-			go func(i int) {
-				for j := 0; j < VPARALLELIZE && (j+i < len(cipher)); j++ {
-					r[i+j] = (*cv)[i+j].KeySwitching(cipher[i+j], (originalEphemeralKeys)[i+j], newKey, private)
-				}
-				defer wg.Done()
-			}(i)
-
-		}
-		wg.Wait()
-	} else {
-		for i, c := range cipher {
-			r[i] = (*cv)[i].KeySwitching(c, (originalEphemeralKeys)[i], newKey, private)
-		}
-	}
-	return r
 }
 
 // Homomorphic operations

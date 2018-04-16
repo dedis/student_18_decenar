@@ -9,7 +9,7 @@ import (
 )
 
 // NameReconstruct is the protocol identifier string.
-const NameDecrypt = "reconstruct"
+const NameDecrypt = "decrypt"
 
 // Decrypt is the core structure of the protocol.
 type Decrypt struct {
@@ -28,7 +28,7 @@ type Decrypt struct {
 }
 
 func init() {
-	network.RegisterMessages(PromptDecrypt{}, SendPartial{}, TerminateDecrypt{})
+	network.RegisterMessages(PromptDecrypt{}, SendPartial{})
 	onet.GlobalProtocolRegister(NameDecrypt, NewDecrypt)
 }
 
@@ -46,41 +46,39 @@ func NewDecrypt(node *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		}
 	}
 
-	decrypt.RegisterHandlers(decrypt.HandlePrompt, decrypt.HandlePartial, decrypt.HandleTerminate)
+	decrypt.RegisterHandlers(decrypt.HandlePrompt, decrypt.HandlePartial)
 	return decrypt, nil
 }
 
 // Start is called on the root node prompting it to send itself a Prompt message.
 func (d *Decrypt) Start() error {
-	return d.SendTo(d.nextNodeInCircuit, &PromptDecrypt{d.EncryptedCBFSet})
+	errors := d.Broadcast(&PromptDecrypt{d.EncryptedCBFSet})
+	if errors != nil {
+		return errors[0]
+	}
+
+	return nil
 }
 
 // HandlePrompt retrieves the mixes, verifies them and performs a partial decryption
 // on the last mix before appending it to the election skipchain.
 func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
-	if !d.IsRoot() {
-		defer d.finish()
-	}
-
-	d.EncryptedCBFSet = prompt.EncryptedCBFSet
+	defer d.Done()
 
 	// partially decrypt
-	partials := make([]kyber.Point, len(*d.EncryptedCBFSet))
-	for i, c := range *d.EncryptedCBFSet {
-		partials[i] = lib.Decrypt(d.Secret.V, c.K, c.C)
-	}
+	partials := d.getPartials(prompt.EncryptedCBFSet)
 
-	d.SendTo(d.Root(), &SendPartial{partials})
-
-	if d.IsRoot() {
-		return d.SendTo(d.Root(), &TerminateDecrypt{})
-	}
-
-	return d.SendTo(d.nextNodeInCircuit, &PromptDecrypt{d.EncryptedCBFSet})
+	// send partials to root
+	return d.SendTo(d.Root(), &SendPartial{partials})
 }
 
 func (d *Decrypt) HandlePartial(partial MessageSendPartial) error {
 	d.Partials[partial.RosterIndex] = partial.Partial
+	if len(d.Partials) >= 2 {
+		d.Partials[d.Index()] = d.getPartials(d.EncryptedCBFSet)
+		d.finish()
+	}
+
 	return nil
 }
 
@@ -90,8 +88,11 @@ func (d *Decrypt) finish() {
 	d.Finished <- true
 }
 
-// HandleTerminate concludes to the protocol.
-func (d *Decrypt) HandleTerminate(terminate MessageTerminateDecrypt) error {
-	d.finish()
-	return nil
+func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
+	partials := make([]kyber.Point, len(*cipher))
+	for i, c := range *cipher {
+		partials[i] = lib.Decrypt(d.Secret.V, c.K, c.C)
+	}
+
+	return partials
 }
