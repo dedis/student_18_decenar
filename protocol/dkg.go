@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/dedis/student_18_decenar/lib"
 	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/kyber.v2"
 	dkg "gopkg.in/dedis/kyber.v2/share/dkg/rabin"
@@ -122,6 +123,12 @@ func (o *SetupDKG) Dispatch() error {
 	err = errors.New("protocol is finished but dkg is not")
 	log.Error(err)
 	return err
+}
+
+// SharedSecret returns the necessary information for doing shared
+// encryption and decryption.
+func (o *SetupDKG) SharedSecret() (*lib.SharedSecret, error) {
+	return lib.NewSharedSecret(o.DKG)
 }
 
 // Children reactions

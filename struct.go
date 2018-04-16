@@ -6,6 +6,7 @@ This holds the messages used to communicate with the service over the network.
 
 import (
 	cosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
+	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/network"
 )
@@ -13,6 +14,7 @@ import (
 // We need to register all messages so the network knows how to handle them.
 func init() {
 	for _, msg := range []interface{}{
+		SetupRequest{}, SetupResponse{},
 		SaveRequest{}, SaveResponse{},
 		RetrieveRequest{}, RetrieveResponse{},
 	} {
@@ -26,6 +28,14 @@ const (
 	// CachePath indicates where to cache retrieved websites
 	CachePath = "/tmp/cocache"
 )
+
+type SetupRequest struct {
+	Roster *onet.Roster
+}
+
+type SetupResponse struct {
+	Key kyber.Point
+}
 
 // SaveRequest will save the website in the conodes using the protocol and
 // return the exit state of the saving process

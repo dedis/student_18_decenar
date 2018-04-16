@@ -22,19 +22,19 @@ type Decrypt struct {
 	EncryptedCBFSet *lib.CipherVector // Election to be decrypted.
 
 	Finished chan bool // Flag to signal protocol termination.
-	Partials []kyber.Point
+	Partials map[int][]kyber.Point
 
 	nextNodeInCircuit *onet.TreeNode // Next node in the circuit
 }
 
 func init() {
-	network.RegisterMessages(PromptDecrypt{}, TerminateDecrypt{})
+	network.RegisterMessages(PromptDecrypt{}, SendPartial{}, TerminateDecrypt{})
 	onet.GlobalProtocolRegister(NameDecrypt, NewDecrypt)
 }
 
 // NewDecrypt initializes the protocol object and registers all the handlers.
 func NewDecrypt(node *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-	decrypt := &Decrypt{TreeNodeInstance: node, Finished: make(chan bool, 1)}
+	decrypt := &Decrypt{TreeNodeInstance: node, Finished: make(chan bool, 1), Partials: make(map[int][]kyber.Point)}
 
 	// determine next node
 	var nodeList = node.Tree().List()
@@ -46,7 +46,7 @@ func NewDecrypt(node *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		}
 	}
 
-	decrypt.RegisterHandlers(decrypt.HandlePrompt, decrypt.HandleTerminate)
+	decrypt.RegisterHandlers(decrypt.HandlePrompt, decrypt.HandlePartial, decrypt.HandleTerminate)
 	return decrypt, nil
 }
 
@@ -70,13 +70,18 @@ func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
 		partials[i] = lib.Decrypt(d.Secret.V, c.K, c.C)
 	}
 
-	d.Partials = partials
+	d.SendTo(d.Root(), &SendPartial{partials})
 
 	if d.IsRoot() {
 		return d.SendTo(d.Root(), &TerminateDecrypt{})
 	}
 
 	return d.SendTo(d.nextNodeInCircuit, &PromptDecrypt{d.EncryptedCBFSet})
+}
+
+func (d *Decrypt) HandlePartial(partial MessageSendPartial) error {
+	d.Partials[partial.RosterIndex] = partial.Partial
+	return nil
 }
 
 // finish terminates the protocol within onet.

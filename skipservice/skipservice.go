@@ -79,7 +79,7 @@ func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) 
 	s.skipstorage.LastSkipBlockID = skipblock.Hash
 	s.skipstorage.Skipchain = append(s.skipstorage.Skipchain, skipblock)
 	s.skipstorage.Unlock()
-	return &decenarch.SkipRootStartResponse{skipblock}, nil
+	return &decenarch.SkipRootStartResponse{Block: skipblock}, nil
 }
 
 // SkipStartRequest create a go-routine that will listen to the s.dataChan and

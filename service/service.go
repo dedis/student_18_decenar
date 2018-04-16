@@ -21,7 +21,9 @@ import (
 	"github.com/dedis/student_18_decenar/lib"
 	"github.com/dedis/student_18_decenar/protocol"
 	"golang.org/x/net/html"
+	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/kyber.v2"
+	"gopkg.in/dedis/kyber.v2/share"
 
 	cosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
 
@@ -32,14 +34,14 @@ import (
 )
 
 // Used for tests
-var templateID onet.ServiceID
+var serviceID onet.ServiceID
 
 // timeout for protocol termination.
 const timeout = 60 * time.Minute
 
 func init() {
 	var err error
-	templateID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
+	serviceID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
 	log.ErrFatal(err)
 	network.RegisterMessage(&storage{})
 }
@@ -57,60 +59,71 @@ type Service struct {
 // than one structure.
 var storageID = []byte("main")
 
-type Partial struct {
-	Points []kyber.Point
-}
-
 type storage struct {
 	sync.Mutex
+	Key      kyber.Point // Key assigned by the DKG.
 	Secret   *lib.SharedSecret
-	Partials map[int]*Partial
+	Partials map[int][]kyber.Point
 }
 
-// SaveRequest is the function called by the service when a client want to save a website in the
-// archive.
-func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
-	stattimes := make([]string, 0)
-	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
-	log.Lvl3("Decenarch Service new SaveRequest")
-	numNodes := len(req.Roster.List)
+// Setup is the function called by the service to setup everything is needed
+// for DecenArch, in particular this function runs the DKG protocol
+func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, error) {
 	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
-	tree := root.GenerateNaryTree(numNodes)
-	fmt.Printf("Tree informations %v\n", tree.Dump())
+	tree := root.GenerateNaryTree(len(req.Roster.List))
 	if tree == nil {
-		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
+		return nil, errors.New("error while creating the tree")
 	}
 
-	// run DKG protocol
-	DKGInstance, _ := s.CreateProtocol(protocol.NameDKG, tree)
-	DKGProtocol := DKGInstance.(*protocol.SetupDKG)
+	instance, _ := s.CreateProtocol(protocol.NameDKG, tree)
+	protocol := instance.(*protocol.SetupDKG)
 
-	if err := DKGProtocol.Start(); err != nil {
+	err := protocol.Start()
+	if err != nil {
 		return nil, err
 	}
-	var key kyber.Point
-	var secret *lib.SharedSecret
+
 	select {
-	case <-DKGProtocol.Done:
-		secret, _ = lib.NewSharedSecret(DKGProtocol.DKG)
-		key = secret.X
+	case <-protocol.Done:
+		secret, err := protocol.SharedSecret()
+		if err != nil {
+			return nil, err
+		}
 		s.storage.Lock()
+		s.storage.Key = secret.X
 		s.storage.Secret = secret
 		s.storage.Unlock()
 		s.save()
 
+		return &decenarch.SetupResponse{Key: secret.X}, nil
 	case <-time.After(timeout):
 		return nil, errors.New("open error, protocol timeout")
 	}
 
-	// IMPROVEMENT threshold and newZero should be easily configurable
-	threshold := int32(math.Ceil(float64(numNodes) * 0.8))
+}
 
+// Save is the function called by the service when a client want to save a website in the
+// archive.
+func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
+	stattimes := make([]string, 0)
+	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
+	log.Lvl3("Decenarch Service new SaveWebpage")
+
+	// create the tree
+	numNodes := len(req.Roster.List)
+	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
+	tree := root.GenerateNaryTree(numNodes)
+	if tree == nil {
+		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
+	}
+
+	// run consensus protocol
+	threshold := int32(math.Ceil(float64(numNodes) * 0.8))
 	pi, err := s.CreateProtocol(protocol.SaveName, tree)
 	if err != nil {
 		return nil, err
 	}
-	pi.(*protocol.SaveLocalState).SharedKey = key
+	pi.(*protocol.SaveLocalState).SharedKey = s.key()
 	pi.(*protocol.SaveLocalState).Url = req.Url
 	pi.(*protocol.SaveLocalState).Threshold = threshold
 	stattimes = append(stattimes, "saveProtoStart;"+time.Now().Format(decenarch.StatTimeFormat))
@@ -148,7 +161,8 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	}
 	var consensusCBF *lib.CipherVector = <-pi.(*protocol.SaveLocalState).ConsensusCBF
 	log.Lvl4("Create stored request")
-	// consensus protocol for all additional ressources
+
+	//  run consensus protocol for all additional ressources
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
 	bytePage, byteErr := base64.StdEncoding.DecodeString(webmain.Page)
 	stattimes = append(stattimes, "sameForAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
@@ -187,21 +201,18 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	instanceDecrypt, _ := s.CreateProtocol(protocol.NameDecrypt, tree)
 	protocolDecrypt := instanceDecrypt.(*protocol.Decrypt)
 	instanceDecrypt.(*protocol.Decrypt).EncryptedCBFSet = consensusCBF
-	instanceDecrypt.(*protocol.Decrypt).Secret = s.storage.Secret
+	instanceDecrypt.(*protocol.Decrypt).Secret = s.secret()
 	if err := protocolDecrypt.Start(); err != nil {
 		return nil, err
 	}
 	select {
 	case <-protocolDecrypt.Finished:
-		fmt.Println("Decrypt finished")
-		s.storage.Lock()
-		s.storage.Partials[tree.Root.RosterIndex] = &Partial{protocolDecrypt.Partials}
-		s.storage.Unlock()
-		s.save()
-
 	case <-time.After(timeout):
 		return nil, errors.New("decrypt error, protocol timeout")
 	}
+
+	partials := protocolDecrypt.Partials
+	s.Reconstruct(partials)
 
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := decenarch.NewSkipClient()
@@ -215,6 +226,39 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "kCBF;"+strconv.Itoa(int(parametersCBF[1])))
 	resp := &decenarch.SaveResponse{Times: stattimes, Proof: proof}
 	return resp, nil
+}
+
+// secret returns the shared secret for a given election.
+func (s *Service) secret() *lib.SharedSecret {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.Secret
+}
+
+// key returns the key given by DKG
+func (s *Service) key() kyber.Point {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.Key
+}
+
+func (s *Service) Reconstruct(partials map[int][]kyber.Point) {
+	points := make([]kyber.Point, 0)
+	n := 3
+	for i := 0; i < len(partials[0]); i++ {
+		shares := make([]*share.PubShare, n)
+		for j, partial := range partials {
+			shares[j] = &share.PubShare{I: j, V: partial[i]}
+		}
+		message, _ := share.RecoverCommit(cothority.Suite, shares, n, n)
+		points = append(points, message)
+	}
+	reconstructed := make([]int64, 0)
+	for _, point := range points {
+		reconstructed = append(reconstructed, lib.GetPointToInt(point))
+	}
+	fmt.Println("I'm there")
+	fmt.Printf("Reconstructed %#v\n", reconstructed)
 }
 
 // RetrieveRequest
@@ -282,12 +326,20 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 	log.Lvl3("Decenarch Service new protocol event")
 	switch node.ProtocolName() {
 	case protocol.NameDKG:
-		instance, _ := protocol.NewSetupDKG(node)
-		protocol := instance.(*protocol.SetupDKG)
+		pi, err := protocol.NewSetupDKG(node)
+		if err != nil {
+			return nil, err
+		}
+		protocol := pi.(*protocol.SetupDKG)
 		go func() {
 			<-protocol.Done
-			secret, _ := lib.NewSharedSecret(protocol.DKG)
+			secret, err := protocol.SharedSecret()
+			if err != nil {
+				log.Error(err)
+				return
+			}
 			s.storage.Lock()
+			s.storage.Key = secret.X
 			s.storage.Secret = secret
 			s.storage.Unlock()
 			s.save()
@@ -300,16 +352,7 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 	case protocol.NameDecrypt:
 		instance, _ := protocol.NewDecrypt(node)
 		protocol := instance.(*protocol.Decrypt)
-		s.storage.Lock()
-		protocol.Secret = s.storage.Secret
-		s.storage.Unlock()
-		go func() {
-			<-protocol.Finished
-			s.storage.Lock()
-			s.storage.Partials[node.Index()] = &Partial{protocol.Partials}
-			s.storage.Unlock()
-			s.save()
-		}()
+		protocol.Secret = s.secret()
 		return protocol, nil
 	default:
 		return nil, errors.New("protocol error, unknown protocol")
@@ -318,6 +361,7 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 
 // saves all skipblocks.
 func (s *Service) save() {
+	log.Lvl3(s.String(), "Saving Service")
 	s.storage.Lock()
 	defer s.storage.Unlock()
 	err := s.Save(storageID, s.storage)
@@ -353,17 +397,16 @@ func (s *Service) tryLoad() error {
 func newService(c *onet.Context) (onet.Service, error) {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
-		storage:          &storage{Partials: make(map[int]*Partial)},
+		storage:          &storage{Partials: make(map[int][]kyber.Point)},
 	}
-	fmt.Printf("Storage %#v\n", s.storage.Partials)
-	if err := s.RegisterHandlers(s.SaveRequest, s.RetrieveRequest); err != nil {
+	if err := s.RegisterHandlers(s.SaveWebpage, s.RetrieveRequest, s.Setup); err != nil {
 		log.Error(err, "Couldn't register messages")
 		return nil, err
 	}
-	if err := s.tryLoad(); err != nil {
-		log.Error(err)
-		return nil, err
-	}
+	//if err := s.tryLoad(); err != nil {
+	//		log.Error(err)
+	//		return nil, err
+	//	}
 	return s, nil
 }
 

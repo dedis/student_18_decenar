@@ -47,7 +47,7 @@ func (c *SkipClient) SkipStart(r *onet.Roster) (*SkipStartResponse, error) {
 		resp = &SkipStartResponse{}
 		err := c.SendProtobuf(
 			srv,
-			&SkipStartRequest{Roster: r, Genesis: rootResp.Bloc},
+			&SkipStartRequest{Roster: r, Genesis: rootResp.Block},
 			resp)
 		if err != nil {
 			errs = append(errs, err)

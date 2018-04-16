@@ -210,8 +210,7 @@ func discreteLog(P kyber.Point, checkNeg bool) int64 {
 	if ok == nil && object != nil {
 		return object.(int64)
 	}
-
-	mutex.Lock()
+	//mutex.Lock()
 	if currentGreatestInt == 0 {
 		currentGreatestM = SuiTe.Point().Null()
 	}
@@ -233,7 +232,7 @@ func discreteLog(P kyber.Point, checkNeg bool) int64 {
 	if m == MaxHomomorphicInt {
 		return 0
 	}
-	mutex.Unlock()
+	//mutex.Unlock()
 
 	if SuiTe.Point().Neg(Bi).Equal(P) {
 		return -m

@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"github.com/dedis/student_18_decenar/lib"
+	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/onet.v2"
 )
 
@@ -25,4 +26,13 @@ type TerminateDecrypt struct{}
 type MessageTerminateDecrypt struct {
 	*onet.TreeNode
 	TerminateDecrypt
+}
+
+type SendPartial struct {
+	Partial []kyber.Point
+}
+
+type MessageSendPartial struct {
+	*onet.TreeNode
+	SendPartial
 }

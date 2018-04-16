@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"encoding/base64"
 	urlpkg "net/url"
@@ -72,7 +73,7 @@ func main() {
 			Usage:     "start the storing skipchain",
 			Aliases:   []string{"k"},
 			ArgsUsage: groupsDef,
-			Action:    cmdSkipStart,
+			Action:    cmdStart,
 		},
 	}
 	cliApp.Flags = []cli.Flag{
@@ -163,12 +164,39 @@ func cmdSave(c *cli.Context) error {
 func cmdSkipStart(c *cli.Context) error {
 	log.Info("SkipStart command")
 	group := readGroup(c)
+	// start the skipchain
 	client := decenarch.NewSkipClient()
 	resp, err := client.SkipStart(group.Roster)
+	fmt.Println("Qui ci sono")
 	if err != nil {
 		log.Fatal("When asking to start skipchain", err)
 	}
 	log.Info("Skipchain started with", resp)
+	return nil
+}
+
+func cmdDKGStart(c *cli.Context) error {
+	group := readGroup(c)
+	client := decenarch.NewClient()
+	resp, err := client.Setup(group.Roster)
+	if err != nil {
+		log.Fatal("When asking to start the DKG protocol", err)
+	}
+	log.Info("DKG protocol went well with key", resp)
+	return nil
+}
+
+func cmdStart(c *cli.Context) error {
+	err := cmdSkipStart(c)
+	if err != nil {
+		return err
+	}
+	time.Sleep(10 * time.Second)
+	err = cmdDKGStart(c)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

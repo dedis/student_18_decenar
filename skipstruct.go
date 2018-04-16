@@ -32,7 +32,7 @@ type SkipRootStartRequest struct {
 // SkipRootStartResponse is the message passed by a skipchain handling conode
 // when it has created the genesis bloc Bloc.
 type SkipRootStartResponse struct {
-	Bloc *skipchain.SkipBlock
+	Block *skipchain.SkipBlock
 }
 
 // SkipStartRequest is the message passed by the user to the skipchain handling

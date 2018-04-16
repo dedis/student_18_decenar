@@ -32,6 +32,18 @@ func NewClient() *Client {
 	return &Client{Client: onet.NewClient(DecenarSuite, ServiceName)}
 }
 
+// Setup will setup everything is needed for DecenArch
+func (c *Client) Setup(r *onet.Roster) (*SetupResponse, error) {
+	dst := r.RandomServerIdentity()
+	resp := &SetupResponse{}
+	err := c.SendProtobuf(dst, &SetupRequest{Roster: r}, resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
 // Save will record the website requested in the conodes
 func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, error) {
 	dst := r.RandomServerIdentity()
