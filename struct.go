@@ -38,7 +38,6 @@ type SaveRequest struct {
 //     - Times  collect statistic times in form key;decenarch.StatTimeFormat
 type SaveResponse struct {
 	Times []string
-	Proof *GeneralProof
 }
 
 // RetrieveRequest will retreive the website from the conode using the protocol
@@ -70,21 +69,4 @@ type Webstore struct {
 	Page        string
 	AddsUrl     []string
 	Timestamp   string
-}
-
-// GeneralProof is the proof of the consensus code. It contains all the data
-// needed to proof and verify that the consensus protocol based on counting
-// Bloom filters was executed correctly by all the conodes.  TODO: add
-// explanation for single fields
-type GeneralProof struct {
-	Url          string
-	CoSig        *cosiservice.SignatureResponse
-	Timestamp    string
-	ConodeProofs map[string]*ConodeProof
-}
-
-// ConodeProof is the ...
-type ConodeProof struct {
-	NoiseSum    int
-	NoiseVector []byte
 }

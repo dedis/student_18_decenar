@@ -56,7 +56,6 @@ type SaveLocalState struct {
 
 	ParametersCBF       []uint
 	RandomEncryptedCBF  []byte
-	ShuffledCBFSet      []byte
 	CountingBloomFilter *CBF
 
 	MsgToSign         chan []byte
@@ -103,7 +102,6 @@ func (p *SaveLocalState) Start() error {
 		return err
 	}
 	// send useful information to the service
-	// TODO: mybe move this to compute all only one time
 	if p.LocalTree != nil {
 		p.ParametersCBFChan <- castParametersCBF(paramCBF)
 		p.StringChan <- strconv.Itoa(len(listUniqueDataLeaves(tree)))
@@ -148,12 +146,13 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 		log.Lvl4("Consensus Phase")
 		// retrieve data again because the Start() function is run only by root
 		// and all the nodes need the three and the hash
-		// TODO: maybe use an if for the root
-		tree, _, err := p.GetLocalData()
-		if err != nil {
-			log.Error("Error in save protocol HandleAnnounce(msg StructSaveAnnounce):", err)
+		if !p.IsRoot() {
+			tree, _, err := p.GetLocalData()
+			if err != nil {
+				log.Error("Error in save protocol HandleAnnounce(msg StructSaveAnnounce):", err)
+			}
+			p.LocalTree = tree
 		}
-		p.LocalTree = tree
 		p.MasterHash = msg.SaveAnnounce.MasterHash
 		p.ParametersCBF = castParametersCBF(msg.SaveAnnounce.ParametersCBF)
 		if msg.SaveAnnounce.NoiseForConodes != nil {
@@ -275,9 +274,8 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 
 				Errs: p.Errs,
 
-				NoisyCBFSet:    p.CountingBloomFilter.GetSet(),
-				ShuffledCBFSet: p.ShuffledCBFSet,
-				CBFSetSig:      CBFSetSig,
+				NoisyCBFSet: p.CountingBloomFilter.GetSet(),
+				CBFSetSig:   CBFSetSig,
 			}
 			return p.SendToParent(&resp)
 		}
@@ -442,8 +440,6 @@ func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveRepl
 		p.CountingBloomFilter = NewFilledBloomFilter(param, locTree)
 		log.Lvl4("Filled CBF for node", p.ServerIdentity().Address,
 			"is", p.CountingBloomFilter)
-		// publish shuffeled set of the local Bloom filter
-		p.ShuffledCBFSet = p.CountingBloomFilter.ShuffleSet(p.Suite())
 		if !p.IsRoot() {
 			// decrypt random vector, where the public key is the root public key
 			randomCBF, err := Decrypt(p.Suite(), p.Private(), p.Root().ServerIdentity.Public, p.RandomEncryptedCBF, param)
@@ -579,13 +575,10 @@ func (p *SaveLocalState) generateNoise(param64 []uint64) (map[string]*Noise, err
 			}
 		}
 
-		// create a random and encrypted CBF for all the conodes
+		// create a random and AEAD encrypted CBF set mask for all the conodes, including the roots
 		for i, kp := range (p.Roster()).Publics() {
 			// generate random counting Bloom filter
 			randomCBF := &CBF{Set: randomMatrix[i], M: param[0], K: param[1]}
-
-			// compute sum of the set of the random Bloom filter
-			sum := randomCBF.Sum()
 
 			// encrypt the CBF using DH to seed AES
 			encodedCipherText, err := randomCBF.Encrypt(p.Suite(), p.Private(), kp)
@@ -594,7 +587,7 @@ func (p *SaveLocalState) generateNoise(param64 []uint64) (map[string]*Noise, err
 			}
 
 			// encode the ciphertext and add to the map
-			randomEncryptedCBFs[kp.String()] = &Noise{EncryptedCBF: encodedCipherText, CBFSum: sum}
+			randomEncryptedCBFs[kp.String()] = &Noise{EncryptedCBF: encodedCipherText}
 		}
 
 		return randomEncryptedCBFs, nil
@@ -674,7 +667,7 @@ func (p *SaveLocalState) BuildConsensusHtmlPage() []byte {
 	var f func(*html.Node)
 	f = func(n *html.Node) {
 		if n.FirstChild == nil { // it is a leaf
-			if p.CountingBloomFilter.Count([]byte(n.Data))-byte(24) < threshold {
+			if p.CountingBloomFilter.Count([]byte(n.Data))-p.NewZero < threshold {
 				n.Parent.RemoveChild(n)
 			}
 

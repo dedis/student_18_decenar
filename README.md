@@ -1,15 +1,19 @@
 This repository contains the implementation of the Decentralized Internet Archive 2.0
 realized in the context of a Master Thesis at the DEDIS laboratory at EPFL.
 
+The implementation contained in this branch assume honest-but-curious conodes, i.e. a conode correctly follows the protocols and only try to learn the content of the data retrieved from other conodes. The implementation for mailicious conodes can be found in the master branch. For more information about the 
+
 This repository is based on the DEDIS [cothority template](https://github.com/dedis/cothority_template).
-**It is highly experimental and still a prototype and should not be considered
-secure or reliable for real-world purposes.**
+
+**The Decentralized Internet Archive is highly experimental and still a prototype and should not be considered secure or reliable for real-world purposes.**
 
 ## Documentation
 
+See the reporto of the Master thesis.
+
 ## Installation
 
-**TODO**
+```go get github.com/dedis/student_18_decenar``` and then install all the 
 
 ## Example
 

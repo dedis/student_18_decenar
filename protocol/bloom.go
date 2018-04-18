@@ -55,7 +55,9 @@ func GetOptimalCBFParametersToSend(root *html.Node) []uint64 {
 // GetOptimalCBFParametersToSend returns the optimal parameters, i.e. M and K,
 // for the tree rooted by root as []uint type
 func getOptimalCBFParameters(root *html.Node) []uint {
-	// TODO: check if this is the adapted zero value to return
+	// if root is nil we return M = K = 0, this is done to keep the code
+	// generic and handle also the additional unstructured resources, such
+	// as images
 	if root == nil {
 		return []uint{0, 0}
 	}
@@ -93,7 +95,7 @@ func (c *CBF) Encrypt(s network.Suite, private kyber.Scalar, public kyber.Point)
 	sharedSecret := s.Point().Mul(private, public)
 
 	// get AEAD cipher
-	gcm, err := newAEAD(s.(kyber.HashFactory).Hash, sharedSecret)
+	gcm, err := newAEAD(s.(kyber.HashFactory).Hash, sharedSecret, public)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +124,10 @@ func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedC
 	sharedSecret := s.Point().Mul(private, public)
 
 	// get AEAD cipher
-	gcm, err := newAEAD(s.(kyber.HashFactory).Hash, sharedSecret)
+	gcm, err := newAEAD(s.(kyber.HashFactory).Hash, sharedSecret, public)
+	if err != nil {
+		return nil, err
+	}
 
 	// decode cipher text encoded in base64
 	cipherAndNonce := make([]byte, base64.RawStdEncoding.DecodedLen(len(encodedCipher)))
@@ -145,7 +150,7 @@ func Decrypt(s network.Suite, private kyber.Scalar, public kyber.Point, encodedC
 }
 
 // newAEAD returns the AEAD cipher, GCM in this case, used to encrypt the CBF's set
-func newAEAD(h func() hash.Hash, DHSharedKey kyber.Point) (cipher.AEAD, error) {
+func newAEAD(h func() hash.Hash, DHSharedKey kyber.Point, public kyber.Point) (cipher.AEAD, error) {
 	// get bytes representation of the DH shared key
 	byteDHSharedSecret, err := DHSharedKey.MarshalBinary()
 	if err != nil {
@@ -154,8 +159,8 @@ func newAEAD(h func() hash.Hash, DHSharedKey kyber.Point) (cipher.AEAD, error) {
 
 	// derive secure AES key using HKDF
 	// Note that key length is hardcoded to 32 bytes
-	// TODO: use salt (cf. RFC5869)
-	reader := hkdf.New(h, byteDHSharedSecret, nil, nil)
+	salt := sha256.Sum256([]byte(public.String()))
+	reader := hkdf.New(h, byteDHSharedSecret, salt[:], nil)
 	key := make([]byte, 32)
 	_, err = reader.Read(key)
 	if err != nil {
@@ -215,74 +220,31 @@ func (c *CBF) Merge(cbf *CBF) {
 	}
 }
 
+// RemoveNewZero subtract newZero from every bucket in c
 func (c *CBF) RemoveNewZero(newZero byte) {
 	for i := range c.Set {
 		c.Set[i] -= newZero
 	}
 }
 
+// MergeSet add set to the receiver's set
 func (c *CBF) MergeSet(set []byte) {
 	for i, counter := range set {
 		c.Set[i] += counter
 	}
 }
 
-func (c *CBF) Sum() int {
-	sum := 0
-	for _, value := range c.Set {
-		sum += int(value)
-	}
-
-	return sum
-}
-
-// Shuffle returns a shuffled CBF, i.e. a CBF with the same set as c,
-// but shuffled. The parameters remain the same. To shuffle the set
-// the Fisher–Yates shuffle algorithm is used
-// see https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
-func (c *CBF) ShuffleSet(s network.Suite) []byte {
-	if c == nil {
-		return nil
-	}
-
-	maxUint := ^uint(0)
-	maxInt := int(maxUint >> 1)
-	shuffledSet := c.Set
-	for i := len(c.Set) - 1; i > 0; i-- {
-		j := int(random.Int(big.NewInt(int64(maxInt)), s.RandomStream()).Int64()) % (i + 1)
-		shuffledSet[i], shuffledSet[j] = shuffledSet[j], shuffledSet[i]
-	}
-
-	return shuffledSet
-}
-
-func (c *CBF) Verify(numberLeaves int) bool {
-	// verify correct number of elements
-	sum := 0
-	for _, counter := range c.Set {
-		sum += int(counter)
-	}
-	if sum/int(c.K) != numberLeaves {
-		return false
-	}
-	// verify that a given counter does not exceed a reasonable value. This
-	// value is computed using statistical informations about the CBF and
-	// some empirical results, as explained in the report
-	return true
-}
-
-func (c *CBF) getParameters() []uint {
-	return []uint{c.M, c.K}
-}
-
+// SetByte set bucket i of the receiver's set with the given value
 func (c *CBF) SetByte(i uint, value byte) {
 	c.Set[i] = value
 }
 
+// GetByte returns the bucket i of the receiver's set
 func (c *CBF) GetByte(i uint) byte {
 	return c.Set[i]
 }
 
+// GetSet returns the set of the receiver
 func (c *CBF) GetSet() []byte {
 	if c == nil {
 		return nil

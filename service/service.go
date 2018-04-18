@@ -63,8 +63,8 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	log.Lvl3("Decenarch Service new SaveRequest")
 	numNodes := len(req.Roster.List)
-	// TODO: this is used only for testing, use GenerateBinaryTree for real application
-	tree := req.Roster.GenerateNaryTreeWithRoot(1, s.ServerIdentity())
+	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
+	tree := root.GenerateNaryTree(len(req.Roster.List))
 	if tree == nil {
 		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
 	}
@@ -105,11 +105,6 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		Page:        base64.StdEncoding.EncodeToString(msgToSign),
 		AddsUrl:     make([]string, 0),
 		Timestamp:   mainTimestamp,
-	}
-	proof := &decenarch.GeneralProof{
-		Url:       realUrl,
-		CoSig:     sig,
-		Timestamp: mainTimestamp,
 	}
 	log.Lvl4("Create stored request")
 	// consensus protocol for all additional ressources
@@ -156,7 +151,7 @@ func (s *Service) SaveRequest(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	stattimes = append(stattimes, "uniqueLeaves;"+uniqueLeaves)
 	stattimes = append(stattimes, "mCBF;"+strconv.Itoa(int(parametersCBF[0])))
 	stattimes = append(stattimes, "kCBF;"+strconv.Itoa(int(parametersCBF[1])))
-	resp := &decenarch.SaveResponse{Times: stattimes, Proof: proof}
+	resp := &decenarch.SaveResponse{Times: stattimes}
 	return resp, nil
 }
 
