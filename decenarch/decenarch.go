@@ -160,6 +160,22 @@ func cmdSave(c *cli.Context) error {
 	return nil
 }
 
+// start DecenArch by starting the skipchain and the DKG protocol
+func cmdStart(c *cli.Context) error {
+	err := cmdSkipStart(c)
+	if err != nil {
+		return err
+	}
+	// give some time to the skipchain for starting
+	time.Sleep(1 * time.Second)
+	err = cmdDKGStart(c)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Start the skipchain that will be responsible to store the websites archived
 func cmdSkipStart(c *cli.Context) error {
 	log.Info("SkipStart command")
@@ -174,6 +190,7 @@ func cmdSkipStart(c *cli.Context) error {
 	return nil
 }
 
+// start the DKG protocol
 func cmdDKGStart(c *cli.Context) error {
 	group := readGroup(c)
 	client := decenarch.NewClient()
@@ -182,21 +199,6 @@ func cmdDKGStart(c *cli.Context) error {
 		log.Fatal("When asking to start the DKG protocol", err)
 	}
 	log.Info("DKG protocol went well with key", resp)
-	return nil
-}
-
-func cmdStart(c *cli.Context) error {
-	err := cmdSkipStart(c)
-	if err != nil {
-		return err
-	}
-	// give some time to the skipchain for starting
-	time.Sleep(1 * time.Second)
-	err = cmdDKGStart(c)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 

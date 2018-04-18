@@ -52,9 +52,10 @@ type SaveLocalState struct {
 
 	PlainData map[string][]byte
 
-	ParametersCBF       []uint
-	CountingBloomFilter *lib.CBF
-	EncryptedCBFSet     *lib.CipherVector
+	ParametersCBF            []uint
+	CountingBloomFilter      *lib.CBF
+	EncryptedCBFSet          *lib.CipherVector
+	EncryptedCBFSetSignature []byte
 
 	MsgToSign         chan []byte
 	StringChan        chan string
@@ -221,7 +222,13 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 		}
 		p.AggregateUnstructData(locHash, reply)
 		p.AggregateCBF(locTree, reply)
-		CBFSetSig, err := p.signCBFSet()
+		// sign the ciphertext. Here we have to use the
+		// encrypt-then-sign paradigm, because the single encrypted CBF
+		// set are never decrypted and since we use an additive
+		// homomorphic scheme, we have to be sure that the ciphertext
+		// is not modifies by an attacker, e.g. by multiplying it by a
+		// scalar
+		CBFSetSig, err := p.signEncryptedCBFSet()
 		if err != nil {
 			return err
 		}
@@ -283,9 +290,7 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 				p.MsgToSign <- p.PlainData[requestedHash]
 			}
 			// announce the end of the process
-			msg := SaveAnnounce{
-				Phase: End,
-				Url:   p.Url}
+			msg := SaveAnnounce{Phase: End, Url: p.Url}
 			return p.HandleAnnounce(StructSaveAnnounce{p.TreeNode(), msg})
 		} else {
 			requestedDataMap := make(map[string][]byte)
@@ -419,9 +424,15 @@ func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveRepl
 		// aggregate children contributions after checking the signature
 		if !p.IsLeaf() {
 			for _, r := range reply {
-				// TODO: verify signature
-				p.EncryptedCBFSet.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
-
+				bytesEncryptedSet, _ := r.EncryptedCBFSet.ToBytes()
+				vErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, bytesEncryptedSet, r.CBFSetSig)
+				if vErr == nil {
+					log.Lvl4("Valid encrypted CBF set signature for node", r.ServerIdentity.Address)
+					p.EncryptedCBFSet.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
+				} else {
+					log.Lvl1("Invalid signature for node", r.ServerIdentity.Address)
+					p.Errs = append(p.Errs, vErr)
+				}
 			}
 		}
 	}
@@ -429,27 +440,26 @@ func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveRepl
 	return nil
 }
 
-// TODO: CHANGE SIGNATURE VERIFICATION FUNCTION BECAUSE NOW I ADDED AN HASH
-// signCBFSet sign the set of the counting Bloom filter with the private key of
-// the node represented by p. An error is returnd an error occur during the
-// signing process.
-func (p *SaveLocalState) signCBFSet() ([]byte, error) {
-	if p.CountingBloomFilter == nil {
-		return []byte(""), nil
+// signEncryptedCBFSet sign the ciphertext of a CBF set with the private key of
+// the node represented by p. An error is returned if something go wrong while
+// signing. Here we have to use the encrypt-then-sign paradigm, because the
+// single encrypted CBF set are never decrypted and since we use an additive
+// homomorphic scheme, we have to be sure that the ciphertext is not modifies
+// by an attacker, e.g. by multiplying it by a scalar
+func (p *SaveLocalState) signEncryptedCBFSet() ([]byte, error) {
+	if p.EncryptedCBFSet == nil {
+		return nil, errors.New("Trying to sign a nil encrypted CBF set")
 	}
 
-	gob, err := p.CountingBloomFilter.Encode()
+	bytesEncryptedSet, _ := p.EncryptedCBFSet.ToBytes()
+	hashed := p.Suite().(kyber.HashFactory).Hash().Sum(bytesEncryptedSet)
+	sig, err := schnorr.Sign(p.Suite(), p.Private(), hashed)
 	if err != nil {
-		return nil, err
-	}
-	setHash := p.Suite().(kyber.HashFactory).Hash().Sum(gob)
-	sig, err := schnorr.Sign(p.Suite(), p.Private(), setHash)
-	if err != nil {
-		log.Lvl1("Error! Impossible to sign CBF set", err)
+		log.Lvl1("Error! Impossible to sign encrypted CBF set", err)
 		p.Errs = append(p.Errs, err)
 		return nil, err
 	}
-	log.Lvl4("CBF set", p.CountingBloomFilter.Set, "for node", p.ServerIdentity().Address,
+	log.Lvl4("Encryted CBF set", p.EncryptedCBFSet, "for node", p.ServerIdentity().Address,
 		"signed with signature", sig)
 	return sig, nil
 }

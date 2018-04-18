@@ -8,6 +8,13 @@ import (
 	"gopkg.in/dedis/kyber.v2/proof/dleq"
 )
 
+type CompleteProofs map[string]*CompleteProof
+
+type CompleteProof struct {
+	AggregationProof *AggregationProof
+	CipherTextProof  *CipherTextProof
+}
+
 type AggregationProof struct {
 	Contributions map[string]CipherVector
 	Aggregation   CipherVector

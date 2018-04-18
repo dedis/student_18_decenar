@@ -132,6 +132,7 @@ func (c *CBF) GetSet() []int64 {
 	return c.Set
 }
 
+// Write writes c to an io.Writer
 func (c *CBF) Write(stream io.Writer) error {
 	err := binary.Write(stream, binary.BigEndian, uint64(c.M))
 	if err != nil {
@@ -149,7 +150,7 @@ func (c *CBF) Write(stream io.Writer) error {
 	return nil
 }
 
-// GobEncode implements gob.GobEncoder interface.
+// Encode encodes the CBF c into a slice oy bytes
 func (c *CBF) Encode() ([]byte, error) {
 	var buf bytes.Buffer
 	err := c.Write(&buf)
