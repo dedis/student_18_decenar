@@ -9,11 +9,11 @@ This repository is based on the DEDIS [cothority template](https://github.com/de
 
 ## Documentation
 
-See the reporto of the Master thesis.
+See the report of the Master thesis.
 
 ## Installation
 
-```go get github.com/dedis/student_18_decenar``` and then install all the 
+```go get github.com/dedis/student_18_decenar``` and then install all the needed dependencies.
 
 ## Example
 
