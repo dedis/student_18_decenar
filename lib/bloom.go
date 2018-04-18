@@ -39,6 +39,10 @@ func NewBloomFilter(param []uint) *CBF {
 	return &CBF{Set: make([]int64, param[0]), M: param[0], K: param[1]}
 }
 
+func BloomFilterFromSet(set []int64, param []uint) *CBF {
+	return &CBF{Set: set, M: param[0], K: param[1]}
+}
+
 // GetOptimalCBFParametersToSend returns the optimal parameters, i.e. M and K,
 // for the tree rooted by root as []uint64 type. This is used to send the
 // parameters using protobuf

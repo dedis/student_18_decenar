@@ -29,8 +29,6 @@ const (
 	NilPhase SavePhase = iota
 	Consensus
 	RequestMissingData
-	CoSigning
-	SkipchainSaving
 	End
 )
 

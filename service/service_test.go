@@ -33,7 +33,7 @@ func TestService(t *testing.T) {
 	}
 
 	// decryption phase
-	set0 := []int64{0, 1, 2, 3}
+	set0 := []int64{0, 2, 1, 0}
 	sets := [][]int64{set0, set0, set0}
 
 	// encrypt sets
@@ -55,6 +55,6 @@ func TestService(t *testing.T) {
 
 	// reconstruct
 	reconstructed := s2.reconstruct(partials)
-	require.Equal(t, []int64{0, 3, 6, 9}, reconstructed)
+	require.Equal(t, []int64{0, 6, 3, 0}, reconstructed)
 
 }

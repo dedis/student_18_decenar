@@ -11,7 +11,6 @@ node will only use the `Handle`-methods, and not call `Start` again.
 */
 
 import (
-	"bytes"
 	"encoding/base64"
 	"errors"
 	"io/ioutil"
@@ -97,12 +96,6 @@ func (p *SaveLocalState) Start() error {
 	p.LocalTree = tree
 	p.MasterHash = hash
 	paramCBF := lib.GetOptimalCBFParametersToSend(tree)
-	// send useful information to the service
-	if p.LocalTree != nil {
-		p.ParametersCBFChan <- castParametersCBF(paramCBF)
-		// TODO: put again
-		//p.StringChan <- strconv.Itoa(len(lib.listUniqueDataLeaves(tree)))
-	}
 	return p.HandleAnnounce(StructSaveAnnounce{
 		p.TreeNode(),
 		SaveAnnounce{
@@ -187,12 +180,6 @@ func (p *SaveLocalState) HandleAnnounce(msg StructSaveAnnounce) error {
 				Errs:       p.Errs},
 		}
 		return p.HandleReply([]StructSaveReply{resp})
-	case CoSigning:
-		// PHASE COSIGNING
-		// For the moment, we use the Cosi API at service level
-	case SkipchainSaving:
-		// PHASE SKIPCHAIN SAVING
-		// For the moment, we use the Cosi API at service level
 	case End:
 		log.Lvl4("End Phase")
 		p.SendToChildren(&msg.SaveAnnounce)
@@ -287,11 +274,10 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 			}
 		}
 		if p.IsRoot() {
+			// send result of consensus on structured and unstructured data to service
 			p.StringChan <- p.Url
 			p.StringChan <- p.ContentType
-
 			if p.LocalTree != nil {
-				p.MsgToSign <- p.BuildConsensusHtmlPage()
 				p.ConsensusCBF <- p.EncryptedCBFSet
 			} else if p.MasterHash != nil && len(p.MasterHash) > 0 {
 				p.MsgToSign <- p.PlainData[requestedHash]
@@ -312,12 +298,6 @@ func (p *SaveLocalState) HandleReply(reply []StructSaveReply) error {
 				RequestedData: requestedDataMap}
 			return p.SendToParent(&resp)
 		}
-	case CoSigning:
-		// PHASE COSIGNING
-		// For the moment, we use the Cosi API at service level
-	case SkipchainSaving:
-		// PHASE SKIPCHAIN SAVING
-		// For the moment, we use the Skipchain API at service level
 	case End:
 		// PHASE END
 		log.Lvl4("End Reply Phase")
@@ -434,7 +414,7 @@ func (p *SaveLocalState) AggregateCBF(locTree *html.Node, reply []StructSaveRepl
 		log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 
 		// encrypt set of the filter using the collective DKG key
-		p.EncryptedCBFSet = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+		p.EncryptedCBFSet, _ = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
 
 		// aggregate children contributions after checking the signature
 		if !p.IsLeaf() {
@@ -573,40 +553,6 @@ func getRequestedMissingHash(p *SaveLocalState) string {
 		}
 	}
 	return missingHash
-}
-
-// BuildConsensusHtmlPage takes the p.LocalTree of the root made of HTML nodes
-// and returns the consensus HTML page coming from the consensus HTML tree.
-// Only the leaves that appears in the combined Bloom filter more than
-// threshold times are included in the HTML page. All the other nodes are
-// included by the root.  The output is a valid HTML page there, it creates a
-// valid html page and outputs it.
-func (p *SaveLocalState) BuildConsensusHtmlPage() []byte {
-	log.Lvl4("Begin building consensus html page")
-	//threshold := byte(p.Threshold)
-
-	var f func(*html.Node)
-	f = func(n *html.Node) {
-		if n.FirstChild == nil { // it is a leaf
-			//if p.CountingBloomFilter.Count([]byte(n.Data))-byte(24) < threshold {
-			//		n.Parent.RemoveChild(n)
-			//	}
-
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			f(c)
-		}
-	}
-	f(p.LocalTree)
-
-	// convert *html.Nodes tree to an html page
-	var page bytes.Buffer
-	// we are sure that nodes[0] contains the root of the tree
-	err := html.Render(&page, p.LocalTree)
-	if err != nil {
-		return nil
-	}
-	return page.Bytes()
 }
 
 // castParametersCBF from uint64 to uint, since uint64 is needed to send the

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"sync"
 	"time"
 
@@ -84,7 +83,7 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	}
 
 	select {
-	case <-protocol.Done:
+	case <-protocol.Finished:
 		secret, err := protocol.SharedSecret()
 		if err != nil {
 			return nil, err
@@ -106,7 +105,6 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 // archive.
 func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
 	stattimes := make([]string, 0)
-	stattimes = append(stattimes, "saveReqStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	log.Lvl3("Decenarch Service new SaveWebpage")
 
 	// create the tree
@@ -126,25 +124,31 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	pi.(*protocol.SaveLocalState).SharedKey = s.key()
 	pi.(*protocol.SaveLocalState).Url = req.Url
 	pi.(*protocol.SaveLocalState).Threshold = threshold
-	stattimes = append(stattimes, "saveProtoStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	go pi.Start()
 	// get result of consensus
 	log.Lvl4("Waiting for protocol data...")
-	var parametersCBF []uint = <-pi.(*protocol.SaveLocalState).ParametersCBFChan
-	//var uniqueLeaves string = <-pi.(*protocol.SaveLocalState).StringChan
-	// TODO: change again
-	var uniqueLeaves string = "0"
 	var realUrl string = <-pi.(*protocol.SaveLocalState).StringChan
 	var contentType string = <-pi.(*protocol.SaveLocalState).StringChan
-	var msgToSign []byte = <-pi.(*protocol.SaveLocalState).MsgToSign
-	stattimes = append(stattimes, "saveCosiStart;"+time.Now().Format(decenarch.StatTimeFormat))
+	//var msgToSign []byte = <-pi.(*protocol.SaveLocalState).MsgToSign
+	var consensusCBF *lib.CipherVector = <-pi.(*protocol.SaveLocalState).ConsensusCBF
+	localTree := pi.(*protocol.SaveLocalState).LocalTree
+	parametersCBF := pi.(*protocol.SaveLocalState).ParametersCBF
+
+	// run decrypt protocol
+	partials, err := s.decrypt(tree, consensusCBF)
+	if err != nil {
+		return nil, err
+	}
+
+	// reconstruct html page
+	msgToSign := s.reconstruct(partials, localTree, parametersCBF)
+
 	// sign the consensus website found
 	cosiclient := cosiservice.NewClient()
 	sig, sigErr := cosiclient.SignatureRequest(req.Roster, msgToSign)
 	if sigErr != nil {
 		return nil, sigErr
 	}
-	stattimes = append(stattimes, "saveCreaStructStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	mainTimestamp := time.Now().Format("2006/01/02 15:04")
 	webmain := decenarch.Webstore{
 		Url:         realUrl,
@@ -154,7 +158,6 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		AddsUrl:     make([]string, 0),
 		Timestamp:   mainTimestamp,
 	}
-	var consensusCBF *lib.CipherVector = <-pi.(*protocol.SaveLocalState).ConsensusCBF
 	log.Lvl4("Create stored request")
 
 	//  run consensus protocol for all additional ressources
@@ -192,27 +195,10 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	}
 	webadds = append(webadds, webmain)
 
-	// run decrypt protocol
-	partials, err := s.decrypt(tree, consensusCBF)
-	if err != nil {
-		return nil, err
-	}
-
-	// reconstruct parials
-	fmt.Printf("Reconstructed: %#v\n", s.reconstruct(partials))
-
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := decenarch.NewSkipClient()
-	stattimes = append(stattimes, "skipAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	skipclient.SkipAddData(req.Roster, webadds)
-	stattimes = append(stattimes, "saveReqEnd;"+time.Now().Format(decenarch.StatTimeFormat))
-	sInt := strconv.Itoa(numNodes)
-	stattimes = append(stattimes, "numbrNodes;"+sInt)
-	stattimes = append(stattimes, "uniqueLeaves;"+uniqueLeaves)
-	stattimes = append(stattimes, "mCBF;"+strconv.Itoa(int(parametersCBF[0])))
-	stattimes = append(stattimes, "kCBF;"+strconv.Itoa(int(parametersCBF[1])))
-	resp := &decenarch.SaveResponse{Times: stattimes}
-	return resp, nil
+	return &decenarch.SaveResponse{Times: stattimes}, nil
 }
 
 func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[int][]kyber.Point, error) {
@@ -234,7 +220,7 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	}
 }
 
-func (s *Service) reconstruct(partials map[int][]kyber.Point) []int64 {
+func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) []byte {
 	points := make([]kyber.Point, 0)
 	n := 3
 	for i := 0; i < len(partials[0]); i++ {
@@ -252,7 +238,44 @@ func (s *Service) reconstruct(partials map[int][]kyber.Point) []int64 {
 		reconstructed = append(reconstructed, lib.GetPointToInt(point))
 	}
 
-	return reconstructed
+	// build the consensus HTML page using the reconstructed Bloom filter
+	consensusCBF := lib.BloomFilterFromSet(reconstructed, paramCBF)
+	htmlPage := buildConsensusHtmlPage(localTree, consensusCBF)
+
+	return htmlPage
+}
+
+// BuildConsensusHtmlPage takes the p.LocalTree of the root made of HTML nodes
+// and returns the consensus HTML page coming from the consensus HTML tree.
+// Only the leaves that appears in the combined Bloom filter more than
+// threshold times are included in the HTML page. All the other nodes are
+// included by the root.  The output is a valid HTML page there, it creates a
+// valid html page and outputs it.
+func buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) []byte {
+	log.Lvl4("Begin building consensus html page")
+
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if n.FirstChild == nil { // it is a leaf
+			//if p.CountingBloomFilter.Count([]byte(n.Data)) < p.Threshold {
+			//	n.Parent.RemoveChild(n)
+			//}
+
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	f(localTree)
+
+	// convert *html.Nodes tree to an html page
+	var page bytes.Buffer
+	// we are sure that nodes[0] contains the root of the tree
+	err := html.Render(&page, localTree)
+	if err != nil {
+		return nil
+	}
+	return page.Bytes()
 }
 
 // Retrieve returns the webpage retrieved from the skipchain
@@ -326,7 +349,7 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		}
 		protocol := pi.(*protocol.SetupDKG)
 		go func() {
-			<-protocol.Done
+			<-protocol.Finished
 			secret, err := protocol.SharedSecret()
 			if err != nil {
 				log.Error(err)
@@ -342,6 +365,7 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 	case protocol.SaveName:
 		instance, _ := protocol.NewSaveProtocol(node)
 		protocol := instance.(*protocol.SaveLocalState)
+		protocol.SharedKey = s.key()
 		return protocol, nil
 	case protocol.NameDecrypt:
 		instance, _ := protocol.NewDecrypt(node)

@@ -84,14 +84,15 @@ func NewDeterministicCipherVector(length int) *DeterministCipherVector {
 //______________________________________________________________________________________________________________________
 
 // encryptPoint creates an elliptic curve point from a non-encrypted point and encrypt it using ElGamal encryption.
-func encryptPoint(pubkey kyber.Point, M kyber.Point) *CipherText {
+func encryptPoint(pubkey kyber.Point, M kyber.Point) (*CipherText, *CipherTextProof) {
 	B := SuiTe.Point().Base()
 	k := SuiTe.Scalar().Pick(random.New()) // ephemeral private key
 	// ElGamal-encrypt the point to produce ciphertext (K,C).
 	K := SuiTe.Point().Mul(k, B)      // ephemeral DH public key
 	S := SuiTe.Point().Mul(k, pubkey) // ephemeral DH shared secret
 	C := S.Add(S, M)                  // message blinded with secret
-	return &CipherText{K, C}
+	cipher := &CipherText{K, C}
+	return cipher, CreateCipherTextProof(cipher, pubkey, k)
 }
 
 // IntToPoint maps an integer to a point in the elliptic curve
@@ -100,6 +101,16 @@ func IntToPoint(integer int64) kyber.Point {
 	i := SuiTe.Scalar().SetInt64(integer)
 	M := SuiTe.Point().Mul(i, B)
 	return M
+}
+
+// ZeroToPoint maps 0 to a point in the elliptic curve
+func ZeroToPoint() kyber.Point {
+	return IntToPoint(int64(0))
+}
+
+// OneToPoint maps 1 to a point in the elliptic curve
+func OneToPoint() kyber.Point {
+	return IntToPoint(int64(1))
 }
 
 // PointToCipherText converts a point into a ciphertext
@@ -113,20 +124,24 @@ func IntToCipherText(integer int64) CipherText {
 }
 
 // EncryptInt encodes i as iB, encrypt it into a CipherText and returns a pointer to it.
-func EncryptInt(pubkey kyber.Point, integer int64) *CipherText {
+func EncryptInt(pubkey kyber.Point, integer int64) (*CipherText, *CipherTextProof) {
 	return encryptPoint(pubkey, IntToPoint(integer))
 }
 
 // EncryptIntVector encrypts a []int into a CipherVector and returns a pointer to it.
-func EncryptIntVector(pubkey kyber.Point, intArray []int64) *CipherVector {
+func EncryptIntVector(pubkey kyber.Point, intArray []int64) (*CipherVector, *CipherVectorProof) {
 	var wg sync.WaitGroup
 	cv := make(CipherVector, len(intArray))
+	cvProof := make(CipherVectorProof, len(intArray))
 	if PARALLELIZE {
 		for i := 0; i < len(intArray); i = i + VPARALLELIZE {
 			wg.Add(1)
 			go func(i int) {
 				for j := 0; j < VPARALLELIZE && (j+i < len(intArray)); j++ {
-					cv[j+i] = *EncryptInt(pubkey, intArray[j+i])
+					c, p := EncryptInt(pubkey, intArray[j+i])
+					cv[j+i] = *c
+					cvProof[j+i] = p
+
 				}
 				defer wg.Done()
 			}(i)
@@ -135,11 +150,13 @@ func EncryptIntVector(pubkey kyber.Point, intArray []int64) *CipherVector {
 		wg.Wait()
 	} else {
 		for i, n := range intArray {
-			cv[i] = *EncryptInt(pubkey, n)
+			cipher, proof := EncryptInt(pubkey, n)
+			cv[i] = *cipher
+			cvProof[i] = proof
 		}
 	}
 
-	return &cv
+	return &cv, &cvProof
 }
 
 // Decryption
