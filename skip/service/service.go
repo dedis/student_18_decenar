@@ -14,8 +14,9 @@ import (
 	"encoding/json"
 
 	decenarch "github.com/dedis/student_18_decenar"
-	skipchain "gopkg.in/dedis/cothority.v2/skipchain"
+	skip "github.com/dedis/student_18_decenar/skip"
 
+	"gopkg.in/dedis/cothority.v2/skipchain"
 	"gopkg.in/dedis/kyber.v2/sign/cosi"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
@@ -23,11 +24,11 @@ import (
 )
 
 // Used for tests
-var templateID onet.ServiceID
+var serviceID onet.ServiceID
 
 func init() {
 	var err error
-	templateID, err = onet.RegisterNewService(decenarch.SkipServiceName, newService)
+	serviceID, err = onet.RegisterNewService(skip.SkipServiceName, newService)
 	log.ErrFatal(err)
 	network.RegisterMessage(&skipstorage{})
 }
@@ -61,7 +62,7 @@ type skipstorage struct {
 
 // SkipRootStartRequest create a genesis block and begin a new skipchain
 // it should not be used without SkipStartRequest.
-func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) (*decenarch.SkipRootStartResponse, error) {
+func (s *SkipService) SkipRootStartRequest(req *skip.SkipRootStartRequest) (*skip.SkipRootStartResponse, error) {
 	log.Lvl1("SkipRootStartRequest execution")
 	skipclient := skipchain.NewClient()
 	// here we assume the skipchain will be forwarded to other member of the roster
@@ -79,14 +80,14 @@ func (s *SkipService) SkipRootStartRequest(req *decenarch.SkipRootStartRequest) 
 	s.skipstorage.LastSkipBlockID = skipblock.Hash
 	s.skipstorage.Skipchain = append(s.skipstorage.Skipchain, skipblock)
 	s.skipstorage.Unlock()
-	return &decenarch.SkipRootStartResponse{Block: skipblock}, nil
+	return &skip.SkipRootStartResponse{Block: skipblock}, nil
 }
 
 // SkipStartRequest create a go-routine that will listen to the s.dataChan and
 // will create a skipblock every skipMin minutes. No data verification will
 // be done. We assume it is done before when storing the data in s.data in the
 // SkipAddDataRequest function.
-func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decenarch.SkipStartResponse, error) {
+func (s *SkipService) SkipStartRequest(req *skip.SkipStartRequest) (*skip.SkipStartResponse, error) {
 	log.Lvl1("SkipStartRequest execution")
 	skipclient := skipchain.NewClient()
 	go func() {
@@ -147,18 +148,18 @@ func (s *SkipService) SkipStartRequest(req *decenarch.SkipStartRequest) (*decena
 			//time.Sleep(skipMin * time.Minute)
 		}
 	}()
-	return &decenarch.SkipStartResponse{Msg: "Blocks creation's loop launched"}, nil
+	return &skip.SkipStartResponse{Msg: "Blocks creation's loop launched"}, nil
 }
 
 // SkipStopRequest sends a signal to the service to stop the loop of skipblock creation
-func (s *SkipService) SkipStopRequest(req *decenarch.SkipStopRequest) (*decenarch.SkipStopResponse, error) {
+func (s *SkipService) SkipStopRequest(req *skip.SkipStopRequest) (*skip.SkipStopResponse, error) {
 	s.stopsignal = true
-	return &decenarch.SkipStopResponse{}, nil
+	return &skip.SkipStopResponse{}, nil
 }
 
 // SkipAddDataRequest receive webstore data, verify their integrity and store
 // the valid data inside the service waiting for them to be put on the skipchain
-func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*decenarch.SkipAddDataResponse, error) {
+func (s *SkipService) SkipAddDataRequest(req *skip.SkipAddDataRequest) (*skip.SkipAddDataResponse, error) {
 	log.Lvl4("SkipAddDataRequest - Begin")
 	s.data = make([]decenarch.Webstore, 0)
 	for _, d := range req.Data {
@@ -182,10 +183,10 @@ func (s *SkipService) SkipAddDataRequest(req *decenarch.SkipAddDataRequest) (*de
 		s.data = append(s.data, d)
 	}
 	log.Lvl4("SkipAddDataRequest - done")
-	return &decenarch.SkipAddDataResponse{}, nil
+	return &skip.SkipAddDataResponse{}, nil
 }
 
-func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*decenarch.SkipGetDataResponse, error) {
+func (s *SkipService) SkipGetDataRequest(req *skip.SkipGetDataRequest) (*skip.SkipGetDataResponse, error) {
 	log.Lvl4("Begin GetData request on service")
 	s.skipstorage.Lock()
 	lastKnowID := s.skipstorage.LastSkipBlockID
@@ -227,7 +228,7 @@ func (s *SkipService) SkipGetDataRequest(req *decenarch.SkipGetDataRequest) (*de
 		}
 		// check if a mainPage was found
 		if mainPage.Url != "" {
-			finalResp := decenarch.SkipGetDataResponse{
+			finalResp := skip.SkipGetDataResponse{
 				MainPage: mainPage,
 				AllPages: webs,
 			}

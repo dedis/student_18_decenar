@@ -29,7 +29,7 @@ type Client struct {
 
 // NewClient instantiates a new decenarch.Client
 func NewClient() *Client {
-	return &Client{Client: onet.NewClient(DecenarSuite, ServiceName)}
+	return &Client{Client: onet.NewClient(Suite, ServiceName)}
 }
 
 // Setup will setup everything is needed for DecenArch

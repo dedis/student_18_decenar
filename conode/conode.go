@@ -25,7 +25,7 @@ import (
 	"gopkg.in/dedis/cothority.v2/ftcosi/check"
 
 	_ "github.com/dedis/student_18_decenar/service"
-	_ "github.com/dedis/student_18_decenar/skipservice"
+	_ "github.com/dedis/student_18_decenar/skip/service"
 	"gopkg.in/dedis/onet.v2/app"
 	"gopkg.in/dedis/onet.v2/cfgpath"
 	"gopkg.in/dedis/onet.v2/log"

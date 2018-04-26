@@ -1,6 +1,12 @@
 package lib
 
-import decenar "github.com/dedis/student_18_decenar"
+// adapted from https://github.com/lca1/unlynx/blob/master/lib/constants.go
+
+import (
+	"sync"
+
+	decenar "github.com/dedis/student_18_decenar"
+)
 
 // PARALLELIZE is true if we use protocols with parallelization of computations.
 const PARALLELIZE = true
@@ -9,4 +15,20 @@ const PARALLELIZE = true
 const VPARALLELIZE = 100
 
 // just to avoid changing everywhere, at least for the moment
-var SuiTe = decenar.DecenarSuite
+var SuiTe = decenar.Suite
+
+// StartParallelize starts parallelization by instanciating number of threads
+func StartParallelize(nbrWg int) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	if PARALLELIZE {
+		wg.Add(nbrWg)
+	}
+	return &wg
+}
+
+// EndParallelize waits for a number of threads to finish
+func EndParallelize(wg *sync.WaitGroup) {
+	if PARALLELIZE {
+		wg.Wait()
+	}
+}

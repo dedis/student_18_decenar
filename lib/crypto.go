@@ -33,14 +33,6 @@ type CipherText struct {
 // CipherVector is a slice of ElGamal encrypted points.
 type CipherVector []CipherText
 
-// DeterministCipherText deterministic encryption of a point.
-type DeterministCipherText struct {
-	Point kyber.Point
-}
-
-// DeterministCipherVector slice of deterministic encrypted points.
-type DeterministCipherVector []DeterministCipherText
-
 // Constructors
 //______________________________________________________________________________________________________________________
 
@@ -65,19 +57,26 @@ func NewCipherVector(length int) *CipherVector {
 	return &cv
 }
 
-// NewDeterministicCipherText create determinist cipher text of null element.
-func NewDeterministicCipherText() *DeterministCipherText {
-	dc := DeterministCipherText{SuiTe.Point().Null()}
-	return &dc
+// Key Pairs (mostly used in tests)
+//----------------------------------------------------------------------------------------------------------------------
+
+// GenKey permits to generate a public/private key pairs.
+func GenKey() (secKey kyber.Scalar, pubKey kyber.Point) {
+	secKey = SuiTe.Scalar().Pick(random.New())
+	pubKey = SuiTe.Point().Mul(secKey, SuiTe.Point().Base())
+	return
 }
 
-// NewDeterministicCipherVector creates a vector of determinist ciphertext of null elements.
-func NewDeterministicCipherVector(length int) *DeterministCipherVector {
-	dcv := make(DeterministCipherVector, length)
-	for i := 0; i < length; i++ {
-		dcv[i] = DeterministCipherText{SuiTe.Point().Null()}
+// GenKeys permits to generate ElGamal public/private key pairs.
+func GenKeys(n int) (kyber.Point, []kyber.Scalar, []kyber.Point) {
+	priv := make([]kyber.Scalar, n)
+	pub := make([]kyber.Point, n)
+	group := SuiTe.Point().Null()
+	for i := 0; i < n; i++ {
+		priv[i], pub[i] = GenKey()
+		group.Add(group, pub[i])
 	}
-	return &dcv
+	return group, priv, pub
 }
 
 // Encryption
@@ -123,6 +122,15 @@ func IntToCipherText(integer int64) CipherText {
 	return PointToCipherText(IntToPoint(integer))
 }
 
+// IntArrayToCipherVector converts an array of int to a CipherVector
+func IntArrayToCipherVector(integers []int64) CipherVector {
+	result := make(CipherVector, len(integers))
+	for i, v := range integers {
+		result[i] = PointToCipherText(IntToPoint(v))
+	}
+	return result
+}
+
 // EncryptInt encodes i as iB, encrypt it into a CipherText and returns a pointer to it.
 func EncryptInt(pubkey kyber.Point, integer int64) (*CipherText, *CipherTextProof) {
 	return encryptPoint(pubkey, IntToPoint(integer))
@@ -162,8 +170,8 @@ func EncryptIntVector(pubkey kyber.Point, intArray []int64) (*CipherVector, *Cip
 // Decryption
 //______________________________________________________________________________________________________________________
 
-// decryptPoint decrypts an elliptic point from an El-Gamal cipher text.
-func decryptPoint(prikey kyber.Scalar, c CipherText) kyber.Point {
+// DecryptPoint decrypts an elliptic point from an El-Gamal cipher text.
+func DecryptPoint(prikey kyber.Scalar, c CipherText) kyber.Point {
 	S := SuiTe.Point().Mul(prikey, c.K) // regenerate shared secret
 	M := SuiTe.Point().Sub(c.C, S)      // use to un-blind the message
 	return M
@@ -171,7 +179,7 @@ func decryptPoint(prikey kyber.Scalar, c CipherText) kyber.Point {
 
 // DecryptInt decrypts an integer from an ElGamal cipher text where integer are encoded in the exponent.
 func DecryptInt(prikey kyber.Scalar, cipher CipherText) int64 {
-	M := decryptPoint(prikey, cipher)
+	M := DecryptPoint(prikey, cipher)
 	return discreteLog(M, false)
 }
 
@@ -189,14 +197,14 @@ func PartiallyDecryptIntVector(prikey kyber.Scalar, cipherVector *CipherVector) 
 	result := make(CipherVector, (len(*cipherVector)))
 	for i, c := range *cipherVector {
 		result[i].K = c.K // randomness remains the same
-		result[i].C = decryptPoint(prikey, c)
+		result[i].C = DecryptPoint(prikey, c)
 	}
 	return &result
 }
 
 // DecryptInt decrypts an integer from an ElGamal cipher text where integer are encoded in the exponent.
 func DecryptCheckZero(prikey kyber.Scalar, cipher CipherText) int64 {
-	M := decryptPoint(prikey, cipher)
+	M := DecryptPoint(prikey, cipher)
 	result := int64(1)
 	if M.Equal(SuiTe.Point().Null()) {
 		result = int64(0)

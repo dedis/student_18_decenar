@@ -11,10 +11,6 @@ import (
 	"gopkg.in/dedis/onet.v2/network"
 )
 
-func TestMain(m *testing.M) {
-	log.MainTest(m)
-}
-
 func TestDecrypt(t *testing.T) {
 	nodes := []int{3, 5, 7}
 	for _, nbrNodes := range nodes {
@@ -40,7 +36,7 @@ func decrypt(t *testing.T, nbrNodes int) {
 	select {
 	case <-protocol.Finished:
 		log.Lvl2("root-node is Done")
-		require.NotNil(t, protocol.)
+		require.NotNil(t, protocol.Finished)
 	case <-time.After(timeout):
 		t.Fatal("Didn't finish in time")
 	}

@@ -91,7 +91,7 @@ func (d *Decrypt) finish() {
 func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
 	partials := make([]kyber.Point, len(*cipher))
 	for i, c := range *cipher {
-		partials[i] = lib.Decrypt(d.Secret.V, c.K, c.C)
+		partials[i] = lib.DecryptPoint(d.Secret.V, lib.CipherText{K: c.K, C: c.C})
 	}
 
 	return partials

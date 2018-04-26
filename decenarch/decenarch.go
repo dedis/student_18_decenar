@@ -12,6 +12,7 @@ import (
 	urlpkg "net/url"
 
 	decenarch "github.com/dedis/student_18_decenar"
+	skip "github.com/dedis/student_18_decenar/skip"
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/onet.v2/app"
@@ -148,6 +149,8 @@ func cmdSave(c *cli.Context) error {
 	}
 	group := readGroup(c)
 	client := decenarch.NewClient()
+
+	// run DKG protocol
 	resp, err := client.Save(group.Roster, url)
 	if err != nil {
 		log.Fatal("When asking to save", url, ":", err)
@@ -181,7 +184,7 @@ func cmdSkipStart(c *cli.Context) error {
 	log.Info("SkipStart command")
 	group := readGroup(c)
 	// start the skipchain
-	client := decenarch.NewSkipClient()
+	client := skip.NewSkipClient()
 	resp, err := client.SkipStart(group.Roster)
 	if err != nil {
 		log.Fatal("When asking to start skipchain", err)

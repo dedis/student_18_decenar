@@ -13,6 +13,8 @@ import (
 
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
+
+	decenarch "github.com/dedis/student_18_decenar"
 )
 
 // ServiceName is used for registration on the onet.
@@ -26,7 +28,7 @@ type SkipClient struct {
 
 // NewClient instantiates a new decenarch.Client
 func NewSkipClient() *SkipClient {
-	return &SkipClient{Client: onet.NewClient(DecenarSuite, SkipServiceName)}
+	return &SkipClient{Client: onet.NewClient(decenarch.Suite, SkipServiceName)}
 }
 
 // SkipStart starts the infinite skipblocks creations loop on all the conodes.
@@ -79,7 +81,7 @@ func (c *SkipClient) SkipStop(r *onet.Roster) (*SkipStopResponse, error) {
 }
 
 // SkipAddData allows to add data to the next block that will be created by the conode.
-func (c *SkipClient) SkipAddData(r *onet.Roster, data []Webstore) (*SkipAddDataResponse, error) {
+func (c *SkipClient) SkipAddData(r *onet.Roster, data []decenarch.Webstore) (*SkipAddDataResponse, error) {
 	log.Lvl1("SkipAddData")
 	resp := &SkipAddDataResponse{}
 	dst := r.RandomServerIdentity()
@@ -102,11 +104,7 @@ func (c *SkipClient) SkipGetData(r *onet.Roster, url string, time string) (*Skip
 	log.Lvl4("Send GetDataRequest to service")
 	err := c.SendProtobuf(
 		dst,
-		&SkipGetDataRequest{
-			Roster:    r,
-			Url:       url,
-			Timestamp: time,
-		},
+		&SkipGetDataRequest{Roster: r, Url: url, Timestamp: time},
 		resp)
 	if err != nil {
 		return nil, err

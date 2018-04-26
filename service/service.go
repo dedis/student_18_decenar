@@ -16,15 +16,16 @@ import (
 	"encoding/base64"
 	urlpkg "net/url"
 
-	"github.com/dedis/student_18_decenar"
+	decenarch "github.com/dedis/student_18_decenar"
 	"github.com/dedis/student_18_decenar/lib"
 	"github.com/dedis/student_18_decenar/protocol"
+	skip "github.com/dedis/student_18_decenar/skip"
 	"golang.org/x/net/html"
-	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/share"
 
-	cosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
+	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosi/protocol"
+	ftcosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
 
 	"gopkg.in/dedis/kyber.v2/sign/cosi"
 	"gopkg.in/dedis/onet.v2"
@@ -60,9 +61,11 @@ var storageID = []byte("main")
 
 type storage struct {
 	sync.Mutex
-	Key      kyber.Point // Key assigned by the DKG.
-	Secret   *lib.SharedSecret
-	Partials map[int][]kyber.Point
+	Threshold     uint32
+	Key           kyber.Point // Key assigned by the DKG.
+	Secret        *lib.SharedSecret
+	LocalHTMLTree *html.Node // HTML tree received by this node
+	Partials      map[int][]kyber.Point
 }
 
 // Setup is the function called by the service to setup everything is needed
@@ -74,10 +77,22 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 		return nil, errors.New("error while creating the tree")
 	}
 
-	instance, _ := s.CreateProtocol(protocol.NameDKG, tree)
-	protocol := instance.(*protocol.SetupDKG)
+	// compute and store threshold. This threshold will be used also by the
+	// other conodes of the roster
+	s.storage.Lock()
+	s.storage.Threshold = uint32(len(req.Roster.List) - (len(req.Roster.List)-1)/3)
+	s.storage.Unlock()
+	s.save()
 
-	err := protocol.Start()
+	// run DKG protocol
+	instance, err := s.CreateProtocol(protocol.NameDKG, tree)
+	if err != nil {
+		return nil, err
+	}
+	protocol := instance.(*protocol.SetupDKG)
+	protocol.Threshold = s.threshold()
+
+	err = protocol.Start()
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +108,6 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 		s.storage.Secret = secret
 		s.storage.Unlock()
 		s.save()
-
 		return &decenarch.SetupResponse{Key: secret.X}, nil
 	case <-time.After(timeout):
 		return nil, errors.New("open error, protocol timeout")
@@ -111,92 +125,133 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	numNodes := len(req.Roster.List)
 	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
 	tree := root.GenerateNaryTree(numNodes)
+	fmt.Printf("Dump tree %v\n", tree.Dump())
 	if tree == nil {
 		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
 	}
 
 	// run consensus protocol
-	threshold := int32(math.Ceil(float64(numNodes) * 0.8))
-	pi, err := s.CreateProtocol(protocol.SaveName, tree)
+	instance, err := s.CreateProtocol(protocol.NameConsensusStructured, tree)
 	if err != nil {
 		return nil, err
 	}
-	pi.(*protocol.SaveLocalState).SharedKey = s.key()
-	pi.(*protocol.SaveLocalState).Url = req.Url
-	pi.(*protocol.SaveLocalState).Threshold = threshold
-	go pi.Start()
-	// get result of consensus
-	log.Lvl4("Waiting for protocol data...")
-	var realUrl string = <-pi.(*protocol.SaveLocalState).StringChan
-	var contentType string = <-pi.(*protocol.SaveLocalState).StringChan
-	//var msgToSign []byte = <-pi.(*protocol.SaveLocalState).MsgToSign
-	var consensusCBF *lib.CipherVector = <-pi.(*protocol.SaveLocalState).ConsensusCBF
-	localTree := pi.(*protocol.SaveLocalState).LocalTree
-	parametersCBF := pi.(*protocol.SaveLocalState).ParametersCBF
-
-	// run decrypt protocol
-	partials, err := s.decrypt(tree, consensusCBF)
+	structuredConsensusProtocol := instance.(*protocol.ConsensusStructuredState)
+	structuredConsensusProtocol.SharedKey = s.key()
+	structuredConsensusProtocol.Url = req.Url
+	structuredConsensusProtocol.Threshold = s.threshold()
+	err = structuredConsensusProtocol.Start()
 	if err != nil {
 		return nil, err
 	}
+	log.Lvl4("Waiting for structuredConsensusProtocol data...")
+	var webmain decenarch.Webstore
+	var mainTimestamp string
+	select {
+	case <-structuredConsensusProtocol.Finished:
+		// only if the consensus protocol terminates succesfully it
+		// makes sense to store the webpage, otherwise an error should
+		// be returned
 
-	// reconstruct html page
-	msgToSign := s.reconstruct(partials, localTree, parametersCBF)
+		// get local tree for verification. We require that also the
+		// root verifies the reconstructed HTML page even if the root
+		// itself creates the reconstructed page to avoid tempering
+		s.storage.Lock()
+		s.storage.LocalHTMLTree = structuredConsensusProtocol.LocalTree
+		s.storage.Unlock()
+		s.save()
 
-	// sign the consensus website found
-	cosiclient := cosiservice.NewClient()
-	sig, sigErr := cosiclient.SignatureRequest(req.Roster, msgToSign)
-	if sigErr != nil {
-		return nil, sigErr
+		// run decryt protocol
+		partials, err := s.decrypt(tree, structuredConsensusProtocol.EncryptedCBFSet)
+		if err != nil {
+			return nil, err
+		}
+
+		// reconstruct html page
+		msgToSign, err := s.reconstruct(partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
+		if err != nil {
+			return nil, err
+		}
+
+		// sign the consensus website found
+		sig, sigErr := s.sign(tree, msgToSign)
+		if sigErr != nil {
+			return nil, sigErr
+		}
+
+		// create storing structure
+		mainTimestamp = time.Now().Format("2006/01/02 15:04")
+		webmain = decenarch.Webstore{
+			Url:         structuredConsensusProtocol.Url,
+			ContentType: structuredConsensusProtocol.ContentType,
+			Sig:         sig,
+			Page:        base64.StdEncoding.EncodeToString(msgToSign),
+			AddsUrl:     make([]string, 0),
+			Timestamp:   mainTimestamp,
+		}
+	case <-time.After(timeout):
+		return nil, errors.New("structuredConsensusProtocol timeout")
 	}
-	mainTimestamp := time.Now().Format("2006/01/02 15:04")
-	webmain := decenarch.Webstore{
-		Url:         realUrl,
-		ContentType: contentType,
-		Sig:         sig,
-		Page:        base64.StdEncoding.EncodeToString(msgToSign),
-		AddsUrl:     make([]string, 0),
-		Timestamp:   mainTimestamp,
-	}
+
 	log.Lvl4("Create stored request")
 
 	//  run consensus protocol for all additional ressources
 	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
-	bytePage, byteErr := base64.StdEncoding.DecodeString(webmain.Page)
-	stattimes = append(stattimes, "sameForAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
-	addsLinks := make([]string, 0)
-	if byteErr == nil {
-		addsLinks = ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
+	bytePage, err := base64.StdEncoding.DecodeString(webmain.Page)
+	if err != nil {
+		return nil, err
 	}
+	stattimes = append(stattimes, "sameForAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
+	addsLinks := ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
+
+	// iterate over additional links and retrieve the content
 	for _, al := range addsLinks {
 		log.Lvl4("Get additional", al)
-		api, aerr := s.CreateProtocol(protocol.SaveName, tree)
-		if aerr == nil {
-			api.(*protocol.SaveLocalState).Url = al
-			api.(*protocol.SaveLocalState).Threshold = threshold
-			go api.Start()
-			ru := <-api.(*protocol.SaveLocalState).StringChan
-			ct := <-api.(*protocol.SaveLocalState).StringChan
-			mts := <-api.(*protocol.SaveLocalState).MsgToSign
-			as, asE := cosiclient.SignatureRequest(req.Roster, mts)
-			if asE == nil {
-				aweb := decenarch.Webstore{
-					Url:         ru,
-					ContentType: ct,
-					Sig:         as,
-					Page:        base64.StdEncoding.EncodeToString(mts),
-					AddsUrl:     make([]string, 0),
-					Timestamp:   mainTimestamp,
-				}
-				webadds = append(webadds, aweb)
-				webmain.AddsUrl = append(webmain.AddsUrl, al)
+		api, err := s.CreateProtocol(protocol.NameConsensusUnstructured, tree)
+		if err != nil {
+			return nil, err
+		}
+		unstructuredConsensusProtocol := api.(*protocol.ConsensusUnstructuredState)
+		unstructuredConsensusProtocol.Url = al
+		unstructuredConsensusProtocol.Threshold = s.threshold()
+		err = api.Start()
+		if err != nil {
+			return nil, err
+		}
+		select {
+		case <-unstructuredConsensusProtocol.Finished:
+			ru := unstructuredConsensusProtocol.Url
+			ct := unstructuredConsensusProtocol.ContentType
+			mts := unstructuredConsensusProtocol.MsgToSign
+
+			// sign the consensus additional data
+			as, err := s.sign(tree, mts)
+			if err != nil {
+				return nil, err
 			}
+
+			// create storing structure
+			aweb := decenarch.Webstore{
+				Url:         ru,
+				ContentType: ct,
+				Sig:         as,
+				Page:        base64.StdEncoding.EncodeToString(mts),
+				AddsUrl:     make([]string, 0),
+				Timestamp:   mainTimestamp,
+			}
+			webadds = append(webadds, aweb)
+			webmain.AddsUrl = append(webmain.AddsUrl, al)
+		case <-time.After(timeout):
+			return nil, errors.New("unstructuredConsensusProtocol timeout")
+
 		}
 	}
+
+	// add additional data to the slice of storing structures
 	webadds = append(webadds, webmain)
 
+	// send data to the blockchain
 	log.Lvl4("sending", webadds, "to skipchain")
-	skipclient := decenarch.NewSkipClient()
+	skipclient := skip.NewSkipClient()
 	skipclient.SkipAddData(req.Roster, webadds)
 	return &decenarch.SaveResponse{Times: stattimes}, nil
 }
@@ -220,7 +275,7 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	}
 }
 
-func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) []byte {
+func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) ([]byte, error) {
 	points := make([]kyber.Point, 0)
 	n := 3
 	for i := 0; i < len(partials[0]); i++ {
@@ -228,7 +283,7 @@ func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.No
 		for j, partial := range partials {
 			shares[j] = &share.PubShare{I: j, V: partial[i]}
 		}
-		message, _ := share.RecoverCommit(cothority.Suite, shares, n, n)
+		message, _ := share.RecoverCommit(decenarch.Suite, shares, n, n)
 		points = append(points, message)
 	}
 
@@ -240,9 +295,12 @@ func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.No
 
 	// build the consensus HTML page using the reconstructed Bloom filter
 	consensusCBF := lib.BloomFilterFromSet(reconstructed, paramCBF)
-	htmlPage := buildConsensusHtmlPage(localTree, consensusCBF)
+	htmlPage, err := s.buildConsensusHtmlPage(localTree, consensusCBF)
+	if err != nil {
+		return nil, err
+	}
 
-	return htmlPage
+	return htmlPage, nil
 }
 
 // BuildConsensusHtmlPage takes the p.LocalTree of the root made of HTML nodes
@@ -251,15 +309,15 @@ func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.No
 // threshold times are included in the HTML page. All the other nodes are
 // included by the root.  The output is a valid HTML page there, it creates a
 // valid html page and outputs it.
-func buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) []byte {
+func (s *Service) buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) ([]byte, error) {
 	log.Lvl4("Begin building consensus html page")
 
 	var f func(*html.Node)
 	f = func(n *html.Node) {
 		if n.FirstChild == nil { // it is a leaf
-			//if p.CountingBloomFilter.Count([]byte(n.Data)) < p.Threshold {
-			//	n.Parent.RemoveChild(n)
-			//}
+			if CBF.Count([]byte(n.Data)) < int64(s.threshold()) {
+				n.Parent.RemoveChild(n)
+			}
 
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -270,12 +328,69 @@ func buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) []byte {
 
 	// convert *html.Nodes tree to an html page
 	var page bytes.Buffer
-	// we are sure that nodes[0] contains the root of the tree
 	err := html.Render(&page, localTree)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return page.Bytes()
+
+	return page.Bytes(), nil
+}
+
+func (s *Service) sign(t *onet.Tree, msgToSign []byte) (*ftcosiservice.SignatureResponse, error) {
+	//func (s *Service) Sign(req *ftcosiservice.SignatureRequest) (*ftcosiservice.SignatureResponse, error) {
+	//	// generate the tree
+	//	nNodes := len(req.Roster.List)
+	//	rooted := req.Roster.NewRosterWithRoot(s.ServerIdentity())
+	//	if rooted == nil {
+	//		return nil, errors.New("we're not in the roster")
+	//	}
+	//	tree := rooted.GenerateNaryTree(nNodes)
+	//	if tree == nil {
+	//		return nil, errors.New("failed to generate tree")
+	//	}
+	pi, err := s.CreateProtocol(protocol.NameSign, t)
+	if err != nil {
+		return nil, errors.New("Couldn't make new protocol: " + err.Error())
+	}
+
+	// configure the protocol
+	p := pi.(*ftcosiprotocol.FtCosi)
+	p.CreateProtocol = s.CreateProtocol
+	p.Msg = msgToSign
+	// We set NSubtrees to the cube root of n to evenly distribute the load,
+	// i.e. depth (=3) = log_f n, where f is the fan-out (branching factor).
+	//p.NSubtrees = int(math.Pow(float64(nNodes), 1.0/3.0))
+	p.NSubtrees = int(math.Pow(float64(t.Size()), 1.0/3.0))
+	if p.NSubtrees < 1 {
+		p.NSubtrees = 1
+	}
+	// Timeout is not a global timeout for the protocol, but a timeout used
+	// for waiting for responses for sub protocols.
+	p.Timeout = time.Second * 5
+
+	// start the protocol
+	log.Lvl3("Cosi Service starting up root protocol")
+	if err = pi.Start(); err != nil {
+		return nil, err
+	}
+
+	if log.DebugVisible() > 1 {
+		log.Printf("%s: Signed a message.\n", time.Now().Format("Mon Jan 2 15:04:05 -0700 MST 2006"))
+	}
+
+	// wait for reply
+	var sig []byte
+	select {
+	case sig = <-p.FinalSignature:
+	case <-time.After(p.Timeout + time.Second):
+		return nil, errors.New("protocol timed out")
+	}
+
+	// The hash is the message ftcosi actually signs, we recompute it the
+	// same way as ftcosi and then return it.
+	h := decenarch.Suite.Hash()
+	h.Write(msgToSign)
+	return &ftcosiservice.SignatureResponse{Hash: h.Sum(nil), Signature: sig}, nil
 }
 
 // Retrieve returns the webpage retrieved from the skipchain
@@ -283,7 +398,7 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 	log.Lvl3("Decenarch Service new RetrieveRequest:", req)
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
-	skipclient := decenarch.NewSkipClient()
+	skipclient := skip.NewSkipClient()
 	resp, err := skipclient.SkipGetData(req.Roster, req.Url, req.Timestamp)
 	if err != nil {
 		return nil, err
@@ -350,6 +465,7 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		protocol := pi.(*protocol.SetupDKG)
 		go func() {
 			<-protocol.Finished
+			fmt.Printf("Protocol %v finisehd\n", protocol.Name())
 			secret, err := protocol.SharedSecret()
 			if err != nil {
 				log.Error(err)
@@ -358,23 +474,55 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			s.storage.Lock()
 			s.storage.Key = secret.X
 			s.storage.Secret = secret
+			s.storage.Threshold = protocol.Threshold // define by the root and valid for all the conodes
 			s.storage.Unlock()
 			s.save()
 		}()
 		return protocol, nil
-	case protocol.SaveName:
-		instance, _ := protocol.NewSaveProtocol(node)
-		protocol := instance.(*protocol.SaveLocalState)
+	case protocol.NameConsensusStructured:
+		instance, err := protocol.NewConsensusStructuredProtocol(node)
+		if err != nil {
+			return nil, err
+		}
+		protocol := instance.(*protocol.ConsensusStructuredState)
 		protocol.SharedKey = s.key()
+		s.storage.Lock()
+		s.storage.LocalHTMLTree = protocol.LocalTree
+		s.storage.Unlock()
+		s.save()
+		return protocol, nil
+	case protocol.NameConsensusUnstructured:
+		instance, err := protocol.NewConsensusUnstructuredProtocol(node)
+		if err != nil {
+			return nil, err
+		}
+		protocol := instance.(*protocol.ConsensusUnstructuredState)
 		return protocol, nil
 	case protocol.NameDecrypt:
-		instance, _ := protocol.NewDecrypt(node)
+		instance, err := protocol.NewDecrypt(node)
+		if err != nil {
+			return nil, err
+		}
 		protocol := instance.(*protocol.Decrypt)
 		protocol.Secret = s.secret()
 		return protocol, nil
 	default:
 		return nil, errors.New("protocol error, unknown protocol")
 	}
+}
+
+// LocalHTMLTree
+func (s *Service) localHTMLTree() *html.Node {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.LocalHTMLTree
+}
+
+// threshold
+func (s *Service) threshold() uint32 {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.Threshold
 }
 
 // secret returns the shared secret for a given election.
@@ -431,7 +579,7 @@ func newService(c *onet.Context) (onet.Service, error) {
 		ServiceProcessor: onet.NewServiceProcessor(c),
 		storage:          &storage{Partials: make(map[int][]kyber.Point)},
 	}
-	if err := s.RegisterHandlers(s.SaveWebpage, s.Retrieve, s.Setup); err != nil {
+	if err := s.RegisterHandlers(s.Setup, s.SaveWebpage, s.Retrieve); err != nil {
 		log.Error(err, "Couldn't register messages")
 		return nil, err
 	}
@@ -461,7 +609,7 @@ func ExtractPageExternalLinks(pageUrl string, page *bytes.Buffer) []string {
 			moreAttr = isMore
 			attributeMap[string(attrKey)] = string(attrValue)
 		}
-		// check for relevant ressources
+		// check for relevant ressources, i.e. CSS file and/or images
 		if tok == html.StartTagToken || tok == html.SelfClosingTagToken {
 			if string(tagName) == "link" && attributeMap["rel"] == "stylesheet" {
 				links = append(links, attributeMap["href"])

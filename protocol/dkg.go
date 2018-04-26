@@ -50,7 +50,6 @@ func NewSetupDKG(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 		TreeNodeInstance: n,
 		keypair:          key.NewKeyPair(cothority.Suite),
 		Finished:         make(chan bool, 1),
-		Threshold:        uint32(len(n.Roster().List) - (len(n.Roster().List)-1)/3),
 		nodes:            n.List(),
 	}
 

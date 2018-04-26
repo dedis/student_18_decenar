@@ -5,9 +5,11 @@ This holds the messages used to communicate with the service over the network.
 */
 
 import (
-	skipchain "gopkg.in/dedis/cothority.v2/skipchain"
+	"gopkg.in/dedis/cothority.v2/skipchain"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/network"
+
+	decenarch "github.com/dedis/student_18_decenar"
 )
 
 // We need to register all messages so the network knows how to handle them.
@@ -65,7 +67,7 @@ type SkipStopResponse struct {
 // the data Data in the next block they will create.
 type SkipAddDataRequest struct {
 	Roster *onet.Roster
-	Data   []Webstore
+	Data   []decenarch.Webstore
 }
 
 // SkipAddDataResponse is used to confirm that the data will be added.
@@ -86,6 +88,6 @@ type SkipGetDataRequest struct {
 // data requested by the user. The MainPage contains the page requested, AllPages
 // contains the additional ressources necessary to display the webpage.
 type SkipGetDataResponse struct {
-	MainPage Webstore
-	AllPages []Webstore
+	MainPage decenarch.Webstore
+	AllPages []decenarch.Webstore
 }
