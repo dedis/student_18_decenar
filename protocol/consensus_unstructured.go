@@ -248,8 +248,6 @@ func (p *ConsensusUnstructuredState) HandleReplyUnstructured(reply []StructSaveR
 			resp := SaveReplyUnstructured{Phase: End, Url: p.Url}
 			return p.SendToParent(&resp)
 		}
-
-		p.Finished <- true
 		return nil
 	default:
 		log.Lvl1("Unknown phase passed by", p)
@@ -258,6 +256,7 @@ func (p *ConsensusUnstructuredState) HandleReplyUnstructured(reply []StructSaveR
 
 	}
 	defer p.Done()
+	p.Finished <- true
 	return nil
 }
 

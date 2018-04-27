@@ -1,12 +1,15 @@
 package protocol
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	decenarch "github.com/dedis/student_18_decenar"
 	"github.com/dedis/student_18_decenar/lib"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/dedis/cothority.v2"
+	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/util/key"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
@@ -17,8 +20,38 @@ import (
 var website = "http://nibelung.ch/decenarch/100p.html"
 var bf []int64 = []int64{1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1}
 
+var consensusStructuredServiceID onet.ServiceID
+
+type consensusStructuredService struct {
+	*onet.ServiceProcessor
+
+	SharedKey kyber.Point
+}
+
+func init() {
+	new := func(ctx *onet.Context) (onet.Service, error) {
+		return &consensusStructuredService{
+			ServiceProcessor: onet.NewServiceProcessor(ctx),
+		}, nil
+	}
+	consensusStructuredServiceID, _ = onet.RegisterNewService(NameConsensusStructured, new)
+}
+
+func (s *consensusStructuredService) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericConfig) (
+	onet.ProtocolInstance, error) {
+
+	switch node.ProtocolName() {
+	case NameConsensusStructured:
+		instance, _ := NewConsensusStructuredProtocol(node)
+		protocol := instance.(*ConsensusStructuredState)
+		protocol.SharedKey = s.SharedKey
+		return protocol, nil
+	default:
+		return nil, errors.New("Unknown protocol")
+	}
+}
 func TestConsensusStructured(t *testing.T) {
-	nodes := []int{3, 5, 7}
+	nodes := []int{3, 5, 7, 15}
 	for _, nbrNodes := range nodes {
 		log.Lvlf1("Starting consensus for structured data with %d nodes", nbrNodes)
 		consensusStructured(t, nbrNodes)
@@ -27,34 +60,30 @@ func TestConsensusStructured(t *testing.T) {
 
 func consensusStructured(t *testing.T, nbrNodes int) {
 	log.Lvl1("Running", nbrNodes, "nodes")
-	local := onet.NewLocalTest(cothority.Suite)
+	local := onet.NewLocalTest(decenarch.Suite)
 	defer local.CloseAll()
-	_, _, tree := local.GenBigTree(nbrNodes, nbrNodes, nbrNodes, true)
-	log.Lvl3(tree.Dump())
 
-	// create the protocol
-	pi, err := local.CreateProtocol(NameConsensusStructured, tree)
-	if err != nil {
-		t.Fatal("Couldn't start protocol:", err)
-	}
-
-	// configure the protocol
-	protocol := pi.(*ConsensusStructuredState)
-
-	// define URL
-	protocol.Url = "http://nibelung.ch/decenarch/100p.html"
+	nodes, _, tree := local.GenBigTree(nbrNodes, nbrNodes, nbrNodes, true)
+	services := local.GetServices(nodes, consensusStructuredServiceID)
 
 	// we don't use DKG to test, but a simple random key
 	// note that DKG is tested somewhere else
 	pair := key.NewKeyPair(cothority.Suite)
-	protocol.SharedKey = pair.Public
 
-	// set arbitrary threshold
-	protocol.Threshold = uint32(nbrNodes - 1)
+	// assign right key to every service
+	for i := range services {
+		services[i].(*consensusStructuredService).SharedKey = pair.Public
+	}
+
+	instance, _ := services[0].(*consensusStructuredService).CreateProtocol(NameConsensusStructured, tree)
+	protocol := instance.(*ConsensusStructuredState)
+	protocol.SharedKey = pair.Public
+	protocol.Url = "http://nibelung.ch/decenarch/100p.html"
+	err := protocol.Start()
+	require.Nil(t, err)
 
 	// start the protocol
 	err = protocol.Start()
-	require.Nil(t, err)
 	timeout := network.WaitRetry * time.Duration(network.MaxRetryConnect*nbrNodes*2) * time.Millisecond
 	select {
 	case <-protocol.Finished:
@@ -68,9 +97,10 @@ func consensusStructured(t *testing.T, nbrNodes int) {
 }
 
 func multiplyByNbrNodes(bf []int64, nbrNodes int) []int64 {
+	tmp := make([]int64, len(bf))
 	for i := range bf {
-		bf[i] *= int64(nbrNodes)
+		tmp[i] = bf[i] * int64(nbrNodes)
 	}
 
-	return bf
+	return tmp
 }

@@ -7,6 +7,7 @@ runs on the node.
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	decenarch "github.com/dedis/student_18_decenar"
 	skip "github.com/dedis/student_18_decenar/skip"
 
+	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosi/protocol"
 	"gopkg.in/dedis/cothority.v2/skipchain"
 	"gopkg.in/dedis/kyber.v2/sign/cosi"
 	"gopkg.in/dedis/onet.v2"
@@ -145,7 +147,6 @@ func (s *SkipService) SkipStartRequest(req *skip.SkipStartRequest) (*skip.SkipSt
 					readTimeout = true
 				}
 			}
-			//time.Sleep(skipMin * time.Minute)
 		}
 	}()
 	return &skip.SkipStartResponse{Msg: "Blocks creation's loop launched"}, nil
@@ -170,7 +171,7 @@ func (s *SkipService) SkipAddDataRequest(req *skip.SkipAddDataRequest) (*skip.Sk
 			return nil, bdErr
 		}
 		vsErr := cosi.Verify(
-			s.Suite().(cosi.Suite),
+			ftcosiprotocol.EdDSACompatibleCosiSuite,
 			req.Roster.Publics(),
 			bd,
 			d.Sig.Signature,
@@ -180,7 +181,7 @@ func (s *SkipService) SkipAddDataRequest(req *skip.SkipAddDataRequest) (*skip.Sk
 		}
 		// effectively add data
 		s.dataChan <- d
-		s.data = append(s.data, d)
+		//s.data = append(s.data, d)
 	}
 	log.Lvl4("SkipAddDataRequest - done")
 	return &skip.SkipAddDataResponse{}, nil

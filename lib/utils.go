@@ -3,7 +3,9 @@ package lib
 import (
 	"errors"
 
+	decenarch "github.com/dedis/student_18_decenar"
 	"golang.org/x/net/html"
+	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/kyber.v2"
 	dkg "gopkg.in/dedis/kyber.v2/share/dkg/rabin"
 )
@@ -37,6 +39,71 @@ func NewSharedSecret(dkg *dkg.DistKeyGenerator) (*SharedSecret, error) {
 		X:       dks.Public(),
 		Commits: dks.Commits,
 	}, nil
+}
+
+// DKGSimulate runs an offline version of the DKG protocol.
+func DKGSimulate(nbrNodes, threshold int) (dkgs []*dkg.DistKeyGenerator, err error) {
+	dkgs = make([]*dkg.DistKeyGenerator, nbrNodes)
+	scalars := make([]kyber.Scalar, nbrNodes)
+	points := make([]kyber.Point, nbrNodes)
+
+	// 1a - initialisation
+	for i := range scalars {
+		scalars[i] = decenarch.Suite.Scalar().Pick(cothority.Suite.RandomStream())
+		points[i] = decenarch.Suite.Point().Mul(scalars[i], nil)
+	}
+
+	// 1b - key-sharing
+	for i := range dkgs {
+		dkgs[i], err = dkg.NewDistKeyGenerator(decenarch.Suite, scalars[i], points, threshold)
+		if err != nil {
+			return
+		}
+	}
+	// Exchange of Deals
+	responses := make([][]*dkg.Response, nbrNodes)
+	for i, p := range dkgs {
+		responses[i] = make([]*dkg.Response, nbrNodes)
+		deals, err := p.Deals()
+		if err != nil {
+			return nil, err
+		}
+		for j, d := range deals {
+			responses[i][j], err = dkgs[j].ProcessDeal(d)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	// ProcessResponses
+	for _, resp := range responses {
+		for j, r := range resp {
+			for k, p := range dkgs {
+				if r != nil && j != k {
+					p.ProcessResponse(r)
+				}
+			}
+		}
+	}
+
+	// Secret commits
+	for _, p := range dkgs {
+		commit, err := p.SecretCommits()
+		if err != nil {
+			return nil, err
+		}
+		for _, p2 := range dkgs {
+			p2.ProcessSecretCommits(commit)
+		}
+	}
+
+	// Verify if all is OK
+	for _, p := range dkgs {
+		if !p.Finished() {
+			return nil, errors.New("one of the dkgs is not finished yet")
+		}
+	}
+	return
 }
 
 // listUniqueDataLeaves takes the root of an HTML tree as input and

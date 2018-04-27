@@ -12,7 +12,6 @@ node will only use the `Handle`-methods, and not call `Start` again.
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
@@ -42,7 +41,6 @@ type ConsensusStructuredState struct {
 	Errs        []error
 	Url         string
 	ContentType string
-	Threshold   uint32
 	SharedKey   kyber.Point
 
 	LocalTree *html.Node
@@ -107,7 +105,8 @@ func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructur
 	if !p.IsRoot() {
 		tree, err := p.GetLocalHTMLData()
 		if err != nil {
-			log.Error("Error in save protocol HandleAnnounce(msg StructSaveAnnounceStructured):", err)
+			log.Error("Error in save protocol HandleAnnounce():", err)
+			return err
 		}
 		p.LocalTree = tree
 	}
@@ -118,7 +117,7 @@ func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructur
 	// propagate the message if we aren't in a leaf, start the
 	// reply process otherwise
 	if !p.IsLeaf() {
-		return p.SendToChildren(&msg.SaveAnnounceStructured)
+		p.SendToChildren(&msg.SaveAnnounceStructured)
 	} else {
 		resp := StructSaveReplyStructured{
 			p.TreeNode(),
@@ -129,6 +128,8 @@ func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructur
 		}
 		return p.HandleReply([]StructSaveReplyStructured{resp})
 	}
+
+	return nil
 }
 
 // HandleReply is the message going up the tree
@@ -139,16 +140,14 @@ func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructur
 func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured) error {
 	log.Lvl4("Handling Save Reply", p)
 	log.Lvl4("And the replies", reply)
+	defer p.Done()
 	// compute and aggregate CBF
-	p.AggregateCBF(p.LocalTree, reply)
+	err := p.AggregateCBF(p.LocalTree, reply)
+	if err != nil {
+		return err
+	}
 	// consensus reach root
-	if p.IsRoot() {
-		log.Lvl4("Consensus reach root, consensus over structured data is done")
-		defer p.Done()
-		p.Finished <- true
-		return nil
-	} else {
-		defer p.Done()
+	if !p.IsRoot() {
 		log.Lvl4("Sending Consensus to Parent")
 		resp := SaveReplyStructured{
 			Phase: p.Phase,
@@ -162,6 +161,9 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 		}
 		return p.SendToParent(&resp)
 	}
+	log.Lvl4("Consensus reach root, consensus over structured data is done")
+	p.Finished <- true
+	return nil
 }
 
 // GetLocalHTMLData retrieve the data from the p.Url and handle it to make it
@@ -230,58 +232,18 @@ func (p *ConsensusStructuredState) AggregateErrors(reply []StructSaveReplyStruct
 // contribution is not taken into account and the verification error is added
 // to p.Errs, but the function does not return error in this case.
 func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []StructSaveReplyStructured) error {
-	// This method is only for structured data
-	if p.LocalTree != nil {
-		param := p.ParametersCBF
-		// fill filter with local data
-		p.CountingBloomFilter = lib.NewFilledBloomFilter(param, locTree)
-		log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
+	param := p.ParametersCBF
+	// fill filter with local data
+	p.CountingBloomFilter = lib.NewFilledBloomFilter(param, locTree)
+	log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 
-		// initialize local proof
-		//p.CompleteProofs = make(lib.CompleteProofs)
-		//p.CompleteProofs[p.Public().String()] = &lib.CompleteProof{}
+	p.EncryptedCBFSet, _ = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
 
-		// encrypt set of the filter using the collective DKG key and prove that the set contains only zeros and ones
-		//p.EncryptedCBFSet, p.CompleteProofs[p.Public().String()].CipherVectorProof = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
-		p.EncryptedCBFSet, _ = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
-
-		// add signature of encrypted CBF set
-		//		var err error
-		//		p.CompleteProofs[p.Public().String()].EncryptedCBFSetSignature, err = p.signEncryptedCBFSet()
-		//		if err != nil {
-		//			return err
-		//		}
-
-		// aggregate children contributions after checking the signature
-		childrenContributions := make(map[string]*lib.CipherVector)
-		if !p.IsLeaf() {
-			for _, r := range reply {
-				// aggregate children proofs with local proof
-				//				for conode, proof := range r.CompleteProofs {
-				//					p.CompleteProofs[conode] = proof
-				//				}
-
-				// aggregate encrypted CBF set after proof verification
-				//				bytesEncryptedSet, _ := r.EncryptedCBFSet.ToBytes()
-				//				hashed := p.Suite().(kyber.HashFactory).Hash().Sum(bytesEncryptedSet)
-				//				vErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, hashed, r.CompleteProofs[r.TreeNode.ServerIdentity.Public.String()].EncryptedCBFSetSignature)
-				//				if vErr == nil {
-				//					log.Lvl4("Valid encrypted CBF set signature for node", r.ServerIdentity.Address)
-				childrenContributions[r.TreeNode.ServerIdentity.Public.String()] = r.EncryptedCBFSet
-				aux := lib.NewCipherVector(len(*p.EncryptedCBFSet))
-				aux.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
-				p.EncryptedCBFSet = aux
-				fmt.Println("FINITO DIOCANE")
-				//p.EncryptedCBFSet.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
-				//				} else {
-				//					log.Lvl1("Invalid signature for node", r.ServerIdentity.Address)
-				//					p.Errs = append(p.Errs, vErr)
-				//				}
-
-			}
-
-			// add local aggregation proof
-			//p.CompleteProofs[p.Public().String()].AggregationProof = lib.CreateAggregationiProof(childrenContributions, p.EncryptedCBFSet)
+	if !p.IsLeaf() {
+		for _, r := range reply {
+			aux := lib.NewCipherVector(len(*p.EncryptedCBFSet))
+			aux.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
+			p.EncryptedCBFSet = aux
 		}
 	}
 

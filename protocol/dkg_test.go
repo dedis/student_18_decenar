@@ -13,10 +13,6 @@ import (
 	"gopkg.in/dedis/cothority.v2"
 )
 
-func TestMain(m *testing.M) {
-	log.MainTest(m)
-}
-
 func TestSetupDKG(t *testing.T) {
 	nodes := []int{3, 5, 7}
 	for _, nbrNodes := range nodes {
@@ -35,13 +31,14 @@ func setupDKG(t *testing.T, nbrNodes int) {
 	pi, err := local.CreateProtocol(NameDKG, tree)
 	protocol := pi.(*SetupDKG)
 	protocol.Wait = true
+	protocol.Threshold = uint32(tree.Size() - (tree.Size()-1)/3)
 	if err != nil {
 		t.Fatal("Couldn't start protocol:", err)
 	}
 	log.ErrFatal(pi.Start())
 	timeout := network.WaitRetry * time.Duration(network.MaxRetryConnect*nbrNodes*2) * time.Millisecond
 	select {
-	case <-protocol.Done:
+	case <-protocol.Finished:
 		log.Lvl2("root-node is Done")
 		require.NotNil(t, protocol.DKG)
 	case <-time.After(timeout):

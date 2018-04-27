@@ -7,7 +7,7 @@ import (
 	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/onet.v2"
 
-	"github.com/dedis/student_18_decenar"
+	decenarch "github.com/dedis/student_18_decenar"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,29 +34,4 @@ func TestService(t *testing.T) {
 	saveResponse, err := s0.SaveWebpage(&decenarch.SaveRequest{Roster: roster, Url: "http://nibelung.ch/decenarch/100p.html"})
 	require.Nil(t, err)
 	require.NotNil(t, saveResponse)
-
-	//	// decryption phase
-	//	set0 := []int64{0, 2, 1, 0}
-	//	sets := [][]int64{set0, set0, set0}
-	//
-	//	// encrypt sets
-	//	encryptedSets := make([]*lib.CipherVector, 0)
-	//	for i, set := range sets {
-	//		// proof is tested somewhere else
-	//		es, _ := lib.EncryptIntVector(services[i].key(), set)
-	//		encryptedSets = append(encryptedSets, es)
-	//	}
-	//
-	//	// add sets
-	//	for _, set := range encryptedSets[1:] {
-	//		encryptedSets[0].Add(*encryptedSets[0], *set)
-	//	}
-	//
-	//	// get partials
-	//	partials, err := s0.decrypt(tree, encryptedSets[0])
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//	_ = partials
-
 }

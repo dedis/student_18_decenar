@@ -112,7 +112,6 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	case <-time.After(timeout):
 		return nil, errors.New("open error, protocol timeout")
 	}
-
 }
 
 // Save is the function called by the service when a client want to save a website in the
@@ -125,7 +124,6 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	numNodes := len(req.Roster.List)
 	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
 	tree := root.GenerateNaryTree(numNodes)
-	fmt.Printf("Dump tree %v\n", tree.Dump())
 	if tree == nil {
 		return nil, fmt.Errorf("%v couldn't create tree", decenarch.ErrorParse)
 	}
@@ -138,7 +136,6 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	structuredConsensusProtocol := instance.(*protocol.ConsensusStructuredState)
 	structuredConsensusProtocol.SharedKey = s.key()
 	structuredConsensusProtocol.Url = req.Url
-	structuredConsensusProtocol.Threshold = s.threshold()
 	err = structuredConsensusProtocol.Start()
 	if err != nil {
 		return nil, err
@@ -152,13 +149,10 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		// makes sense to store the webpage, otherwise an error should
 		// be returned
 
-		// get local tree for verification. We require that also the
-		// root verifies the reconstructed HTML page even if the root
-		// itself creates the reconstructed page to avoid tempering
-		s.storage.Lock()
+		// get HTML tree to reconstruct the HTML page after consensus.
+		// Note that only root has access to this, so no need to
+		// (un)lock here
 		s.storage.LocalHTMLTree = structuredConsensusProtocol.LocalTree
-		s.storage.Unlock()
-		s.save()
 
 		// run decryt protocol
 		partials, err := s.decrypt(tree, structuredConsensusProtocol.EncryptedCBFSet)
@@ -264,6 +258,7 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	p := pi.(*protocol.Decrypt)
 	pi.(*protocol.Decrypt).EncryptedCBFSet = encryptedCBFSet
 	pi.(*protocol.Decrypt).Secret = s.secret()
+	pi.(*protocol.Decrypt).Threshold = s.threshold()
 	if err := p.Start(); err != nil {
 		return nil, err
 	}
@@ -337,21 +332,8 @@ func (s *Service) buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) ([]
 }
 
 func (s *Service) sign(t *onet.Tree, msgToSign []byte) (*ftcosiservice.SignatureResponse, error) {
-	//func (s *Service) Sign(req *ftcosiservice.SignatureRequest) (*ftcosiservice.SignatureResponse, error) {
-	//	// generate the tree
-	//	nNodes := len(req.Roster.List)
-	//	rooted := req.Roster.NewRosterWithRoot(s.ServerIdentity())
-	//	if rooted == nil {
-	//		return nil, errors.New("we're not in the roster")
-	//	}
-	//	tree := rooted.GenerateNaryTree(nNodes)
-	//	if tree == nil {
-	//		return nil, errors.New("failed to generate tree")
-	//	}
+	// protocol instance
 	pi, err := s.CreateProtocol(protocol.NameSign, t)
-	if err != nil {
-		return nil, errors.New("Couldn't make new protocol: " + err.Error())
-	}
 
 	// configure the protocol
 	p := pi.(*ftcosiprotocol.FtCosi)
@@ -359,7 +341,6 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte) (*ftcosiservice.Signature
 	p.Msg = msgToSign
 	// We set NSubtrees to the cube root of n to evenly distribute the load,
 	// i.e. depth (=3) = log_f n, where f is the fan-out (branching factor).
-	//p.NSubtrees = int(math.Pow(float64(nNodes), 1.0/3.0))
 	p.NSubtrees = int(math.Pow(float64(t.Size()), 1.0/3.0))
 	if p.NSubtrees < 1 {
 		p.NSubtrees = 1
@@ -374,20 +355,17 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte) (*ftcosiservice.Signature
 		return nil, err
 	}
 
-	if log.DebugVisible() > 1 {
-		log.Printf("%s: Signed a message.\n", time.Now().Format("Mon Jan 2 15:04:05 -0700 MST 2006"))
-	}
-
 	// wait for reply
 	var sig []byte
 	select {
 	case sig = <-p.FinalSignature:
-	case <-time.After(p.Timeout + time.Second):
+	case <-time.After(p.Timeout*5 + time.Second):
+		fmt.Println("Timeout")
 		return nil, errors.New("protocol timed out")
 	}
 
-	// The hash is the message ftcosi actually signs, we recompute it the
-	// same way as ftcosi and then return it.
+	//The hash is the message ftcosi actually signs, we recompute it the
+	//same way as ftcosi and then return it.
 	h := decenarch.Suite.Hash()
 	h.Write(msgToSign)
 	return &ftcosiservice.SignatureResponse{Hash: h.Sum(nil), Signature: sig}, nil
@@ -413,7 +391,7 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 	}
 	log.Lvl4("service-RetrieveRequest-verify signature")
 	vsigErr := cosi.Verify(
-		s.Suite().(cosi.Suite),
+		ftcosiprotocol.EdDSACompatibleCosiSuite,
 		req.Roster.Publics(),
 		bPage,
 		resp.MainPage.Sig.Signature,
@@ -428,7 +406,7 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 				baPage, baErr := base64.StdEncoding.DecodeString(addPage.Page)
 				if baErr == nil {
 					sErr := cosi.Verify(
-						s.Suite().(cosi.Suite),
+						ftcosiprotocol.EdDSACompatibleCosiSuite,
 						req.Roster.Publics(),
 						baPage,
 						addPage.Sig.Signature,
@@ -465,7 +443,6 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		protocol := pi.(*protocol.SetupDKG)
 		go func() {
 			<-protocol.Finished
-			fmt.Printf("Protocol %v finisehd\n", protocol.Name())
 			secret, err := protocol.SharedSecret()
 			if err != nil {
 				log.Error(err)
@@ -486,10 +463,6 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		}
 		protocol := instance.(*protocol.ConsensusStructuredState)
 		protocol.SharedKey = s.key()
-		s.storage.Lock()
-		s.storage.LocalHTMLTree = protocol.LocalTree
-		s.storage.Unlock()
-		s.save()
 		return protocol, nil
 	case protocol.NameConsensusUnstructured:
 		instance, err := protocol.NewConsensusUnstructuredProtocol(node)
@@ -505,6 +478,27 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		}
 		protocol := instance.(*protocol.Decrypt)
 		protocol.Secret = s.secret()
+		protocol.Threshold = s.threshold()
+		return protocol, nil
+	case protocol.NameSign:
+		protocol, err := protocol.NewSignProtocol(node)
+		if err != nil {
+			return nil, err
+		}
+		return protocol, nil
+	case protocol.NameSubSign:
+		protocol, err := protocol.NewSubSignProtocol(node)
+		if err != nil {
+			return nil, err
+		}
+		return protocol, nil
+	case protocol.SaveName:
+		instance, err := protocol.NewSaveProtocol(node)
+		if err != nil {
+			return nil, err
+		}
+		protocol := instance.(*protocol.SaveLocalState)
+		protocol.SharedKey = s.key()
 		return protocol, nil
 	default:
 		return nil, errors.New("protocol error, unknown protocol")

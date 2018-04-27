@@ -4,6 +4,7 @@ import (
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/network"
 
+	"github.com/dedis/onet/log"
 	"github.com/dedis/student_18_decenar/lib"
 	"gopkg.in/dedis/kyber.v2"
 )
@@ -14,15 +15,14 @@ const NameDecrypt = "decrypt"
 // Decrypt is the core structure of the protocol.
 type Decrypt struct {
 	*onet.TreeNodeInstance
-
-	User      uint32
-	Signature []byte
+	Threshold uint32 // How many replies are needed to re-create the secret
+	Failures  int    // How many failures occured so far
 
 	Secret          *lib.SharedSecret // Secret is the private key share from the DKG.
 	EncryptedCBFSet *lib.CipherVector // Election to be decrypted.
 
-	Finished chan bool // Flag to signal protocol termination.
-	Partials map[int][]kyber.Point
+	Partials map[int][]kyber.Point // Parials to return
+	Finished chan bool             // Flag to signal protocol termination.
 
 	nextNodeInCircuit *onet.TreeNode // Next node in the circuit
 }
@@ -72,20 +72,31 @@ func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
 	return d.SendTo(d.Root(), &SendPartial{partials})
 }
 
-func (d *Decrypt) HandlePartial(partial MessageSendPartial) error {
-	d.Partials[partial.RosterIndex] = partial.Partial
-	if len(d.Partials) >= 2 {
+func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
+	// handle the case in which a conode refuses to send its partial
+	if reply.Partial == nil {
+		log.Lvl2("Node", reply.ServerIdentity, "refused to reply")
+		d.Failures++
+		if d.Failures > len(d.Roster().List)-int(d.Threshold) {
+			log.Lvl2(reply.ServerIdentity, "couldn't get enough shares")
+			d.finish(false)
+		}
+		return nil
+	}
+
+	d.Partials[reply.RosterIndex] = reply.Partial
+	if len(d.Partials) >= int(d.Threshold-1) {
 		d.Partials[d.Index()] = d.getPartials(d.EncryptedCBFSet)
-		d.finish()
+		d.finish(true)
 	}
 
 	return nil
 }
 
 // finish terminates the protocol within onet.
-func (d *Decrypt) finish() {
+func (d *Decrypt) finish(result bool) {
 	d.Done()
-	d.Finished <- true
+	d.Finished <- result
 }
 
 func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
