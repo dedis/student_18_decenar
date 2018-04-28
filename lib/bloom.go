@@ -58,7 +58,7 @@ func getOptimalCBFParameters(root *html.Node) []uint {
 	if root == nil {
 		return []uint{0, 0}
 	}
-	uniqueLeaves := uint(len(listUniqueDataLeaves(root)))
+	uniqueLeaves := uint(len(ListUniqueDataLeaves(root)))
 	m, k := bestParameters(uniqueLeaves, 0.0001)
 
 	return []uint{m, k}
@@ -68,7 +68,7 @@ func getOptimalCBFParameters(root *html.Node) []uint {
 // in the AnonTree with the root given as parameter
 // Return the CBF to allow chaining
 func (c *CBF) AddUniqueLeaves(root *html.Node) *CBF {
-	uniqueLeaves := listUniqueDataLeaves(root)
+	uniqueLeaves := ListUniqueDataLeaves(root)
 	for _, l := range uniqueLeaves {
 		c.Add([]byte(l))
 	}

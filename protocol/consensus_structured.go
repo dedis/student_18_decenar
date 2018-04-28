@@ -159,6 +159,7 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 
 			CompleteProofs: p.CompleteProofs,
 		}
+		p.Finished <- true
 		return p.SendToParent(&resp)
 	}
 	log.Lvl4("Consensus reach root, consensus over structured data is done")

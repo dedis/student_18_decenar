@@ -116,7 +116,7 @@ func DKGSimulate(nbrNodes, threshold int) (dkgs []*dkg.DistKeyGenerator, err err
 //     the tree   A D C   will output [F,D,E]
 //               / \   \
 //              D   E   F
-func listUniqueDataLeaves(root *html.Node) []string {
+func ListUniqueDataLeaves(root *html.Node) []string {
 	leaves := make([]string, 0)
 	discovered := make(map[string]bool)
 	var f func(*html.Node)

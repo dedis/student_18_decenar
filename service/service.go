@@ -53,6 +53,7 @@ type Service struct {
 	// are correctly handled.
 	*onet.ServiceProcessor
 
+	// TODO: what to store here and what put into the storage?
 	LatestID skipchain.SkipBlockID
 
 	storage *storage
@@ -66,9 +67,10 @@ type storage struct {
 	sync.Mutex
 	GenesisID     skipchain.SkipBlockID
 	Threshold     uint32
+	LocalHTMLTree *html.Node // HTML tree received by this node
+	Leaves        []string
 	Key           kyber.Point // Key assigned by the DKG.
 	Secret        *lib.SharedSecret
-	LocalHTMLTree *html.Node // HTML tree received by this node
 	Partials      map[int][]kyber.Point
 }
 
@@ -169,7 +171,14 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		// get HTML tree to reconstruct the HTML page after consensus.
 		// Note that only root has access to this, so no need to
 		// (un)lock here
+		// TODO: verify if this is correct
 		s.storage.LocalHTMLTree = structuredConsensusProtocol.LocalTree
+
+		// get unique leaves
+		//s.storage.Lock()
+		s.storage.Leaves = lib.ListUniqueDataLeaves(structuredConsensusProtocol.LocalTree)
+		//s.storage.Unlock()
+		//s.save()
 
 		// run decryt protocol
 		partials, err := s.decrypt(tree, structuredConsensusProtocol.EncryptedCBFSet)
@@ -184,7 +193,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		}
 
 		// sign the consensus website found
-		sig, sigErr := s.sign(tree, msgToSign)
+		sig, sigErr := s.sign(tree, msgToSign, true)
 		if sigErr != nil {
 			return nil, sigErr
 		}
@@ -235,7 +244,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 			mts := unstructuredConsensusProtocol.MsgToSign
 
 			// sign the consensus additional data
-			as, err := s.sign(tree, mts)
+			as, err := s.sign(tree, mts, false)
 			if err != nil {
 				return nil, err
 			}
@@ -355,9 +364,23 @@ func (s *Service) buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) ([]
 	return page.Bytes(), nil
 }
 
-func (s *Service) sign(t *onet.Tree, msgToSign []byte) (*ftcosiservice.SignatureResponse, error) {
-	// protocol instance
-	pi, err := s.CreateProtocol(protocol.NameSign, t)
+func (s *Service) sign(t *onet.Tree, msgToSign []byte, structured bool) (*ftcosiservice.SignatureResponse, error) {
+	// create the protocol depending on the data we want to sign -
+	// structured, i.e. HTML, or unstructured data
+	var pi onet.ProtocolInstance
+	var err error
+	if structured {
+		// protocol instance
+		pi, err = s.CreateProtocol(protocol.NameSignStructured, t)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		pi, err = s.CreateProtocol(protocol.NameSignUnstructured, t)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// configure the protocol
 	p := pi.(*ftcosiprotocol.FtCosi)
@@ -372,6 +395,17 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte) (*ftcosiservice.Signature
 	// Timeout is not a global timeout for the protocol, but a timeout used
 	// for waiting for responses for sub protocols.
 	p.Timeout = time.Second * 5
+
+	// add data for verification depending on what we want to sign
+	if structured {
+		data := protocol.VerificationData{Leaves: s.uniqueLeaves()}
+		dataMarshaled, err := network.Marshal(&data)
+		if err != nil {
+			fmt.Println("ERRORE")
+			return nil, err
+		}
+		p.Data = dataMarshaled
+	}
 
 	// start the protocol
 	log.Lvl3("Cosi Service starting up root protocol")
@@ -487,6 +521,17 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		}
 		protocol := instance.(*protocol.ConsensusStructuredState)
 		protocol.SharedKey = s.key()
+		go func() {
+			<-protocol.Finished
+			// get local HTML of the conode for later verification of the
+			// proposed consensus HTML page
+			//s.storage.Lock()
+			//s.storage.LocalHTMLTree = protocol.LocalTree
+			s.storage.Lock()
+			s.storage.Leaves = lib.ListUniqueDataLeaves(protocol.LocalTree)
+			s.storage.Unlock()
+			s.save()
+		}()
 		return protocol, nil
 	case protocol.NameConsensusUnstructured:
 		instance, err := protocol.NewConsensusUnstructuredProtocol(node)
@@ -504,36 +549,45 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		protocol.Secret = s.secret()
 		protocol.Threshold = s.threshold()
 		return protocol, nil
-	case protocol.NameSign:
-		protocol, err := protocol.NewSignProtocol(node)
+	case protocol.NameSignStructured:
+		protocol, err := protocol.NewSignStructuredProtocol(node)
 		if err != nil {
 			return nil, err
 		}
 		return protocol, nil
-	case protocol.NameSubSign:
-		protocol, err := protocol.NewSubSignProtocol(node)
+	case protocol.NameSubSignStructured:
+		protocol, err := protocol.NewSubSignStructuredProtocol(node)
 		if err != nil {
 			return nil, err
 		}
 		return protocol, nil
-	case protocol.SaveName:
-		instance, err := protocol.NewSaveProtocol(node)
+	case protocol.NameSignUnstructured:
+		protocol, err := protocol.NewSignUnstructuredProtocol(node)
 		if err != nil {
 			return nil, err
 		}
-		protocol := instance.(*protocol.SaveLocalState)
-		protocol.SharedKey = s.key()
+		return protocol, nil
+	case protocol.NameSubSignUnstructured:
+		protocol, err := protocol.NewSubSignUnstructuredProtocol(node)
+		if err != nil {
+			return nil, err
+		}
 		return protocol, nil
 	default:
 		return nil, errors.New("protocol error, unknown protocol")
 	}
 }
 
+func (s *Service) uniqueLeaves() []string {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.Leaves
+}
+
 func (s *Service) genesisID() skipchain.SkipBlockID {
 	s.storage.Lock()
 	defer s.storage.Unlock()
 	return s.storage.GenesisID
-
 }
 
 // LocalHTMLTree
