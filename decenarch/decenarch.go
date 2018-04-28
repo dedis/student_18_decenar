@@ -6,13 +6,11 @@ import (
 	"os"
 	"path"
 	"strings"
-	"time"
 
 	"encoding/base64"
 	urlpkg "net/url"
 
 	decenarch "github.com/dedis/student_18_decenar"
-	skip "github.com/dedis/student_18_decenar/skip"
 	"golang.org/x/net/html"
 
 	"gopkg.in/dedis/onet.v2/app"
@@ -163,45 +161,16 @@ func cmdSave(c *cli.Context) error {
 	return nil
 }
 
-// start DecenArch by starting the skipchain and the DKG protocol
+// setup everything is needed for DecenArch to work properly, namely the
+// skipchain service and the DKG protocol
 func cmdStart(c *cli.Context) error {
-	err := cmdSkipStart(c)
-	if err != nil {
-		return err
-	}
-	// give some time to the skipchain for starting
-	time.Sleep(1 * time.Second)
-	err = cmdDKGStart(c)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Start the skipchain that will be responsible to store the websites archived
-func cmdSkipStart(c *cli.Context) error {
-	log.Info("SkipStart command")
-	group := readGroup(c)
-	// start the skipchain
-	client := skip.NewSkipClient()
-	resp, err := client.SkipStart(group.Roster)
-	if err != nil {
-		log.Fatal("When asking to start skipchain", err)
-	}
-	log.Info("Skipchain started with", resp)
-	return nil
-}
-
-// start the DKG protocol
-func cmdDKGStart(c *cli.Context) error {
 	group := readGroup(c)
 	client := decenarch.NewClient()
 	resp, err := client.Setup(group.Roster)
 	if err != nil {
 		log.Fatal("When asking to start the DKG protocol", err)
 	}
-	log.Info("DKG protocol went well with key", resp)
+	log.Info("Skipchain started and DKG protocol went well with key", resp)
 	return nil
 }
 

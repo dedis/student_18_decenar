@@ -21,6 +21,7 @@ import (
 	"github.com/dedis/student_18_decenar/protocol"
 	skip "github.com/dedis/student_18_decenar/skip"
 	"golang.org/x/net/html"
+	"gopkg.in/dedis/cothority.v2/skipchain"
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/share"
 
@@ -52,6 +53,8 @@ type Service struct {
 	// are correctly handled.
 	*onet.ServiceProcessor
 
+	LatestID skipchain.SkipBlockID
+
 	storage *storage
 }
 
@@ -61,6 +64,7 @@ var storageID = []byte("main")
 
 type storage struct {
 	sync.Mutex
+	GenesisID     skipchain.SkipBlockID
 	Threshold     uint32
 	Key           kyber.Point // Key assigned by the DKG.
 	Secret        *lib.SharedSecret
@@ -71,18 +75,31 @@ type storage struct {
 // Setup is the function called by the service to setup everything is needed
 // for DecenArch, in particular this function runs the DKG protocol
 func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, error) {
-	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
-	tree := root.GenerateNaryTree(len(req.Roster.List))
-	if tree == nil {
-		return nil, errors.New("error while creating the tree")
-	}
-
 	// compute and store threshold. This threshold will be used also by the
 	// other conodes of the roster
 	s.storage.Lock()
 	s.storage.Threshold = uint32(len(req.Roster.List) - (len(req.Roster.List)-1)/3)
 	s.storage.Unlock()
 	s.save()
+
+	// start skipchain
+	client := skip.NewSkipClient(int(s.threshold()))
+	genesis, err := client.SkipStart(req.Roster)
+
+	// store genesis ID
+	s.storage.Lock()
+	s.storage.GenesisID = genesis.Hash
+	s.storage.Unlock()
+	s.save()
+
+	fmt.Println(s.genesisID())
+
+	// run DKG protocol
+	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
+	tree := root.GenerateNaryTree(len(req.Roster.List))
+	if tree == nil {
+		return nil, errors.New("error while creating the tree")
+	}
 
 	// run DKG protocol
 	instance, err := s.CreateProtocol(protocol.NameDKG, tree)
@@ -245,8 +262,15 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 	// send data to the blockchain
 	log.Lvl4("sending", webadds, "to skipchain")
-	skipclient := skip.NewSkipClient()
-	skipclient.SkipAddData(req.Roster, webadds)
+	skipclient := skip.NewSkipClient(int(s.threshold()))
+	resp, err := skipclient.SkipAddData(s.genesisID(), req.Roster, webadds)
+	if err != nil {
+		return nil, err
+	}
+
+	// store latest block ID for retrieval
+	s.LatestID = resp.Latest.Hash
+
 	return &decenarch.SaveResponse{Times: stattimes}, nil
 }
 
@@ -376,8 +400,8 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 	log.Lvl3("Decenarch Service new RetrieveRequest:", req)
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
-	skipclient := skip.NewSkipClient()
-	resp, err := skipclient.SkipGetData(req.Roster, req.Url, req.Timestamp)
+	skipclient := skip.NewSkipClient(int(s.threshold()))
+	resp, err := skipclient.SkipGetData(s.LatestID, req.Roster, req.Url, req.Timestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +434,7 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 						req.Roster.Publics(),
 						baPage,
 						addPage.Sig.Signature,
-						cosi.CompletePolicy{})
+						cosi.NewThresholdPolicy(int(s.threshold())))
 					if sErr == nil {
 						returnResp.Adds = append(returnResp.Adds, addPage)
 					} else {
@@ -503,6 +527,13 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 	default:
 		return nil, errors.New("protocol error, unknown protocol")
 	}
+}
+
+func (s *Service) genesisID() skipchain.SkipBlockID {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.GenesisID
+
 }
 
 // LocalHTMLTree

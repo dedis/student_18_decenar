@@ -172,7 +172,7 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 // returned value are nil, then an error occured.
 func (p *ConsensusStructuredState) GetLocalHTMLData() (*html.Node, error) {
 	// get data
-	resp, realUrl, _, err := getRemoteData(p.Url)
+	resp, realUrl, err := getRemoteData(p.Url)
 	if err != nil {
 		log.Lvl1("Error! Impossible to retrieve remote data.")
 		return nil, err
@@ -199,21 +199,21 @@ func (p *ConsensusStructuredState) GetLocalHTMLData() (*html.Node, error) {
 // the url - the un-alias url corresponding to the response (id est the path to
 // the file on the remote server) - the url structure associated (see net/url
 // Url struct) - an error status
-func getRemoteData(url string) (*http.Response, string, *urlpkg.URL, error) {
+func getRemoteData(url string) (*http.Response, string, error) {
 	getResp, getErr := http.Get(url)
 	if getErr != nil {
-		return nil, "", nil, getErr
+		return nil, "", getErr
 	}
 
 	realUrl := getResp.Request.URL.String()
 
-	urlStruct, urlErr := urlpkg.Parse(realUrl)
+	_, urlErr := urlpkg.Parse(realUrl)
 	if urlErr != nil {
 		getResp.Body.Close()
-		return nil, "", nil, urlErr
+		return nil, "", urlErr
 	}
 
-	return getResp, realUrl, urlStruct, getErr
+	return getResp, realUrl, getErr
 }
 
 // AggregateErrors put all the errors contained in the children reply inside
