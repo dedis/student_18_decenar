@@ -82,6 +82,10 @@ func verificationFunctionStructured(msg, data []byte) bool {
 	}
 
 	// verify all the proofs of the protocol
+	completeProofs := vfData.(*VerificationData).CompleteProofs
+	if !completeProofs.VerifyCompleteProofs() {
+		return false
+	}
 
 	return true
 }

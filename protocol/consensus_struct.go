@@ -44,7 +44,6 @@ const (
 //				encrypted for each conode using a DH shared secret. Note
 //				that the CBF of the root is not encrypted.
 type SaveAnnounceStructured struct {
-	Phase         SavePhase
 	Url           string
 	ParametersCBF []uint64
 }
@@ -54,6 +53,43 @@ type SaveAnnounceStructured struct {
 type StructSaveAnnounceStructured struct {
 	*onet.TreeNode
 	SaveAnnounceStructured
+}
+
+// SaveReply return the protocol status, the consensus data and the errors of
+// the conode that executed a save request.
+//     Url:		url of the webpage the conodes will reach consensus on
+//     Errs:		errors that happends during the protocol
+//     MasterTree:	tree representing structured data anonymised
+//     MasterTreeSig:	signature of the root of the tree, creator of MasterTree
+//     MasterHash:	hash representing unstructured data with its signatures
+//
+//     CBFSet:		set of the counting Bloom filter of a given node merged
+//			with the sets of the children's filters
+//     CBFSetSig:	signature of CBFSet
+type SaveReplyStructured struct {
+	Url  string
+	Errs []error
+
+	EncryptedCBFSet *lib.CipherVector
+	CBFSetSig       []byte
+
+	CompleteProofs lib.CompleteProofs
+}
+
+// StructSaveReply just contains StructSaveReply and the data necessary to
+// identify and process the message in the sda framework.
+type StructSaveReplyStructured struct {
+	*onet.TreeNode
+	SaveReplyStructured
+}
+
+type CompleteProofsAnnounce struct {
+	CompleteProofs lib.CompleteProofs
+}
+
+type StructCompleteProofsAnnounce struct {
+	*onet.TreeNode
+	CompleteProofsAnnounce
 }
 
 // SaveAnnounceUnstructured
@@ -69,48 +105,13 @@ type StructSaveAnnounceUnstructured struct {
 	SaveAnnounceUnstructured
 }
 
-// SaveReply return the protocol status, the consensus data and the errors of
-// the conode that executed a save request.
+// SaveReplyUnstructured
 //     Phase:		phase the protocol is currently
-//     Url:		url of the webpage the conodes will reach consensus on
-//     Errs:		errors that happends during the protocol
-//     MasterTree:	tree representing structured data anonymised
-//     MasterTreeSig:	signature of the root of the tree, creator of MasterTree
-//     MasterHash:	hash representing unstructured data with its signatures
-//
-//     SeenMap:		the map of the Seen field of each service of each conode.
-//			The keys are the public keys of the conode.
-//     SigMap:		the map of the signature associatied with the Seen field of each
-//			conodes. For a given public key (kyber.Point) both SigMap and
-//			SeenMap must have an entry
-//
 //     RequestedNode:	the map linking the hash of an AnonNode's data with its
 //			plaintext html data.
 //     RequestedData:	the map linking the hash of an unstructured data with
 //			its plaintext data.
 //
-//     CBFSet:		set of the counting Bloom filter of a given node merged
-//			with the sets of the children's filters
-//     CBFSetSig:	signature of CBFSet
-type SaveReplyStructured struct {
-	Phase SavePhase
-	Url   string
-	Errs  []error
-
-	EncryptedCBFSet *lib.CipherVector
-	CBFSetSig       []byte
-
-	CompleteProofs lib.CompleteProofs
-}
-
-// StructSaveReply just contains StructSaveReply and the data necessary to
-// identify and process the message in the sda framework.
-type StructSaveReplyStructured struct {
-	*onet.TreeNode
-	SaveReplyStructured
-}
-
-// SaveReplyUnstructured
 type SaveReplyUnstructured struct {
 	Phase      SavePhase
 	Url        string

@@ -1,11 +1,15 @@
 package lib
 
 import (
+	"fmt"
 	"reflect"
 
-	"github.com/dedis/student_18_decenar"
+	decenarch "github.com/dedis/student_18_decenar"
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/proof/dleq"
+	"gopkg.in/dedis/kyber.v2/sign/schnorr"
+	"gopkg.in/dedis/onet.v2"
+	"gopkg.in/dedis/onet.v2/log"
 )
 
 type CompleteProofs map[string]*CompleteProof
@@ -13,13 +17,60 @@ type CompleteProofs map[string]*CompleteProof
 // CompleteProof contains all the proofs a node has to provide in order to
 // verify that he followed the protocol without cheating
 type CompleteProof struct {
+	Roster                   *onet.Roster
+	TreeMarshal              *onet.TreeMarshal
+	PublicKey                kyber.Point
 	AggregationProof         *AggregationProof
 	CipherVectorProof        *CipherVectorProof
+	EncryptedCBFSet          *CipherVector
 	EncryptedCBFSetSignature []byte
-	Leaf                     bool // leafs have one proof less
+}
+
+func (p *CompleteProofs) VerifyCompleteProofs() bool {
+	for _, v := range *p {
+		if !v.VerifyCompleteProof() {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (p *CompleteProof) VerifyCompleteProof() bool {
+	// for both leaf and non leaf node we verify the signature of the
+	// ciphervector, i.e. the encrypted CBF set. Note that if the node creating this proof spoof someone's else identity, by using it's public key, this proof will not work and therefore it will be rejected.
+	bytesEncryptedSet, _ := p.EncryptedCBFSet.ToBytes()
+	hashed := decenarch.Suite.Hash().Sum(bytesEncryptedSet)
+	vErr := schnorr.Verify(decenarch.Suite, p.PublicKey, hashed, p.EncryptedCBFSetSignature)
+	if vErr != nil {
+		fmt.Println(vErr)
+		return false
+	}
+
+	// verify if the node is a leaf
+	tree, err := p.TreeMarshal.MakeTree(p.Roster)
+	if err != nil {
+		log.Lvl1("error during MakeTree(), proof is rejected")
+		return false
+	}
+
+	// verify that the node is really who he claims to be
+	if !tree.Root.ServerIdentity.Public.Equal(p.PublicKey) {
+		return false
+	}
+
+	// the node is a leaf?
+	isLeaf := len(tree.Root.Children) == 0
+
+	// if the node responsible of this complete proof is a leaf, we only
+	// have to verify the signature of the ciphervector and the proof that
+	// the ciphervector containts only zeros and ones, since a leaf node is
+	// not responsible of aggregating ciphervectors of other conodes
+	if isLeaf {
+		return p.CipherVectorProof.VerifyCipherVectorProof()
+	}
+
+	// if the node isn't a leaf, we verify all the proofs
 	return p.AggregationProof.VerifyAggregationProof() && p.CipherVectorProof.VerifyCipherVectorProof()
 }
 

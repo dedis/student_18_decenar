@@ -12,9 +12,11 @@ node will only use the `Handle`-methods, and not call `Start` again.
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
+	"strings"
 
 	"golang.org/x/net/html"
 
@@ -31,6 +33,7 @@ import (
 func init() {
 	network.RegisterMessage(SaveAnnounceStructured{})
 	network.RegisterMessage(SaveReplyStructured{})
+	network.RegisterMessage(CompleteProofsAnnounce{})
 	onet.GlobalProtocolRegister(NameConsensusStructured, NewConsensusStructuredProtocol)
 }
 
@@ -50,7 +53,8 @@ type ConsensusStructuredState struct {
 	EncryptedCBFSet          *lib.CipherVector
 	EncryptedCBFSetSignature []byte
 
-	CompleteProofs lib.CompleteProofs
+	CompleteProofs       lib.CompleteProofs
+	CompleteProofsToSend lib.CompleteProofs
 
 	Finished chan bool
 }
@@ -63,7 +67,7 @@ func NewConsensusStructuredProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInst
 		Url:              "",
 		Finished:         make(chan bool),
 	}
-	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply} {
+	for _, handler := range []interface{}{t.HandleAnnounce, t.HandleReply, t.HandleCompleteProofs} {
 		if err := t.RegisterHandler(handler); err != nil {
 			return nil, errors.New("couldn't register handler: " + err.Error())
 		}
@@ -122,9 +126,8 @@ func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructur
 		resp := StructSaveReplyStructured{
 			p.TreeNode(),
 			SaveReplyStructured{
-				Phase: msg.SaveAnnounceStructured.Phase,
-				Url:   msg.SaveAnnounceStructured.Url,
-				Errs:  p.Errs},
+				Url:  msg.SaveAnnounceStructured.Url,
+				Errs: p.Errs},
 		}
 		return p.HandleReply([]StructSaveReplyStructured{resp})
 	}
@@ -140,7 +143,6 @@ func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructur
 func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured) error {
 	log.Lvl4("Handling Save Reply", p)
 	log.Lvl4("And the replies", reply)
-	defer p.Done()
 	// compute and aggregate CBF
 	err := p.AggregateCBF(p.LocalTree, reply)
 	if err != nil {
@@ -150,8 +152,7 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 	if !p.IsRoot() {
 		log.Lvl4("Sending Consensus to Parent")
 		resp := SaveReplyStructured{
-			Phase: p.Phase,
-			Url:   p.Url,
+			Url: p.Url,
 
 			Errs: p.Errs,
 
@@ -159,10 +160,32 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 
 			CompleteProofs: p.CompleteProofs,
 		}
-		p.Finished <- true
 		return p.SendToParent(&resp)
 	}
-	log.Lvl4("Consensus reach root, consensus over structured data is done")
+
+	log.Lvl4("Consensus reach root, now send complete proofs to all conodes")
+	errs := p.Broadcast(&CompleteProofsAnnounce{p.CompleteProofs})
+	if len(errs) > 0 {
+		var errsStrings []string
+		for _, e := range errs {
+			errsStrings = append(errsStrings, e.Error())
+		}
+		return errors.New(strings.Join(errsStrings, "\n"))
+	}
+
+	// root is done
+	p.Finished <- true
+
+	return nil
+}
+
+func (p *ConsensusStructuredState) HandleCompleteProofs(cp StructCompleteProofsAnnounce) error {
+	defer p.Done()
+
+	// get complete proofs from root
+	p.CompleteProofsToSend = cp.CompleteProofs
+
+	// communicate termination of the protocol
 	p.Finished <- true
 	return nil
 }
@@ -233,19 +256,63 @@ func (p *ConsensusStructuredState) AggregateErrors(reply []StructSaveReplyStruct
 // contribution is not taken into account and the verification error is added
 // to p.Errs, but the function does not return error in this case.
 func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []StructSaveReplyStructured) error {
+	// get public key of this node as string
+	pubKeyString := p.Public().String()
+
+	// get parameters CBF
 	param := p.ParametersCBF
+
 	// fill filter with local data
 	p.CountingBloomFilter = lib.NewFilledBloomFilter(param, locTree)
 	log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 
-	p.EncryptedCBFSet, _ = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+	// initialize local proof
+	p.CompleteProofs = make(lib.CompleteProofs)
+	p.CompleteProofs[pubKeyString] = &lib.CompleteProof{
+		Roster:      p.Roster(),
+		TreeMarshal: p.Tree().MakeTreeMarshal(),
+		PublicKey:   p.Public(),
+	}
 
+	// encrypt set of the filter using the collective DKG key and prove
+	// that the set contains only zeros and ones
+	p.EncryptedCBFSet, p.CompleteProofs[pubKeyString].CipherVectorProof = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+
+	// add encrypted CBF set and its signature to the proof material of
+	// this conode
+	p.CompleteProofs[pubKeyString].EncryptedCBFSet = p.EncryptedCBFSet
+	sig, err := p.signEncryptedCBFSet()
+	if err != nil {
+		fmt.Println("Problema nel sign")
+		return err
+	}
+	p.CompleteProofs[pubKeyString].EncryptedCBFSetSignature = sig
+
+	// aggregate children contributions after checking the signature
+	childrenContributions := make(map[string]*lib.CipherVector)
 	if !p.IsLeaf() {
 		for _, r := range reply {
-			aux := lib.NewCipherVector(len(*p.EncryptedCBFSet))
-			aux.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
-			p.EncryptedCBFSet = aux
+			// aggregate children proofs with local proof
+			for conode, proof := range r.CompleteProofs {
+				p.CompleteProofs[conode] = proof
+			}
+
+			// aggregate encrypted CBF set after proof verification
+			bytesEncryptedSet, _ := r.EncryptedCBFSet.ToBytes()
+			hashed := p.Suite().(kyber.HashFactory).Hash().Sum(bytesEncryptedSet)
+			vErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, hashed, r.CompleteProofs[r.TreeNode.ServerIdentity.Public.String()].EncryptedCBFSetSignature)
+			if vErr == nil {
+				log.Lvl4("Valid encrypted CBF set signature for node", r.ServerIdentity.Address)
+				childrenContributions[r.TreeNode.ServerIdentity.Public.String()] = r.EncryptedCBFSet
+				p.EncryptedCBFSet.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
+			} else {
+				log.Lvl1("Invalid signature for node", r.ServerIdentity.Address)
+				p.Errs = append(p.Errs, vErr)
+			}
 		}
+
+		// add local aggregation proof
+		p.CompleteProofs[pubKeyString].AggregationProof = lib.CreateAggregationiProof(childrenContributions, p.EncryptedCBFSet)
 	}
 
 	return nil
