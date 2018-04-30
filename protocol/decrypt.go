@@ -72,6 +72,7 @@ func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
 	return d.SendTo(d.Root(), &SendPartial{partials})
 }
 
+// HandlePartial
 func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
 	// handle the case in which a conode refuses to send its partial
 	if reply.Partial == nil {
@@ -99,6 +100,7 @@ func (d *Decrypt) finish(result bool) {
 	d.Finished <- result
 }
 
+// getPartials
 func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
 	partials := make([]kyber.Point, len(*cipher))
 	for i, c := range *cipher {

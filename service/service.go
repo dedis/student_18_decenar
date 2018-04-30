@@ -37,7 +37,7 @@ import (
 var serviceID onet.ServiceID
 
 // timeout for protocol termination.
-const timeout = 1 * time.Minute
+const timeout = 10 * time.Minute
 
 func init() {
 	var err error
