@@ -106,8 +106,14 @@ func CreateCipherTextProof(c *CipherText, publicKey kyber.Point, blinding kyber.
 }
 
 func (p *CipherVectorProof) VerifyCipherVectorProof() bool {
+	c := make(chan bool, len(*p))
 	for _, cipherTextProof := range *p {
-		if !cipherTextProof.verify() {
+		go cipherTextProof.verify(c)
+	}
+
+	// analyze outcomes
+	for outcome := range c {
+		if !outcome {
 			return false
 		}
 	}
@@ -115,7 +121,7 @@ func (p *CipherVectorProof) VerifyCipherVectorProof() bool {
 	return true
 }
 
-func (p *CipherTextProof) verify() bool {
+func (p *CipherTextProof) verify(c chan bool) {
 	C := p.CipherText.C
 	K := p.CipherText.K
 	cMinusZero := decenarch.Suite.Point().Sub(C, ZeroToPoint())
@@ -124,7 +130,7 @@ func (p *CipherTextProof) verify() bool {
 	oneProof := p.Proof.Verify(decenarch.Suite, decenarch.Suite.Point().Base(), p.PublicKey, K, cMinusOne)
 
 	if (zeroProof != nil && oneProof != nil) || (zeroProof == nil && oneProof == nil) {
-		return false
+		c <- false
 	}
-	return true
+	c <- true
 }
