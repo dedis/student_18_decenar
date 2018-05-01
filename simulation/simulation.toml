@@ -3,12 +3,17 @@ Simulation = "SimulationService"
 BF = 2
 Rounds = 1
 #CloseWait = 6000
+RunWait = "60m"
 Suite = "Ed25519"
 
 Hosts
+3
 4
+5
+6
+7
 8
-16
+#16
 #32
 #64
 #128

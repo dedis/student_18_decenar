@@ -47,7 +47,7 @@ func (s *decryptService) NewProtocol(node *onet.TreeNodeInstance, conf *onet.Gen
 }
 
 func TestDecryptProtocol(t *testing.T) {
-	for _, nodes := range []int{3, 5, 7} {
+	for _, nodes := range []int{3, 5, 7, 11} {
 		log.Lvl1("Starting protocol Decrypt protocol with", nodes, "nodes")
 		runDecrypt(t, nodes)
 	}

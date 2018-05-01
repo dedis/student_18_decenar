@@ -5,7 +5,7 @@ package lib
 import (
 	"sync"
 
-	decenar "github.com/dedis/student_18_decenar"
+	decenarch "github.com/dedis/student_18_decenar"
 )
 
 // PARALLELIZE is true if we use protocols with parallelization of computations.
@@ -15,7 +15,7 @@ const PARALLELIZE = true
 const VPARALLELIZE = 100
 
 // just to avoid changing everywhere, at least for the moment
-var SuiTe = decenar.Suite
+var SuiTe = decenarch.Suite
 
 // StartParallelize starts parallelization by instanciating number of threads
 func StartParallelize(nbrWg int) *sync.WaitGroup {

@@ -1,4 +1,4 @@
-package simulation
+package main
 
 import (
 	// Service needs to be imported here to be instantiated.

@@ -37,7 +37,7 @@ import (
 var serviceID onet.ServiceID
 
 // timeout for protocol termination.
-const timeout = 10 * time.Minute
+const timeout = 60 * time.Minute
 
 func init() {
 	var err error
@@ -71,7 +71,6 @@ type storage struct {
 	Threshold      uint32
 	Key            kyber.Point // Key assigned by the DKG.
 	Secret         *lib.SharedSecret
-	Partials       map[int][]kyber.Point
 	CompleteProofs lib.CompleteProofs
 }
 
@@ -222,7 +221,6 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	if err != nil {
 		return nil, err
 	}
-	stattimes = append(stattimes, "sameForAddStart;"+time.Now().Format(decenarch.StatTimeFormat))
 	addsLinks := ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
 
 	// iterate over additional links and retrieve the content
@@ -294,20 +292,21 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	pi.(*protocol.Decrypt).EncryptedCBFSet = encryptedCBFSet
 	pi.(*protocol.Decrypt).Secret = s.secret()
 	pi.(*protocol.Decrypt).Threshold = s.threshold()
-	if err := p.Start(); err != nil {
+	err = p.Start()
+	if err != nil {
 		return nil, err
 	}
-	select {
-	case <-p.Finished:
-		return p.Partials, nil
-	case <-time.After(timeout):
-		return nil, errors.New("decrypt error, protocol timeout")
+
+	if !<-p.Finished {
+		return nil, errors.New("decrypt error, impossible to ge partials")
 	}
+	log.Lvl3("Decryption protocol is done.")
+	return p.Partials, nil
 }
 
 func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) ([]byte, error) {
 	points := make([]kyber.Point, 0)
-	n := 3
+	n := len(partials)
 	for i := 0; i < len(partials[0]); i++ {
 		shares := make([]*share.PubShare, n)
 		for j, partial := range partials {
@@ -657,7 +656,7 @@ func (s *Service) tryLoad() error {
 func newService(c *onet.Context) (onet.Service, error) {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
-		storage:          &storage{Partials: make(map[int][]kyber.Point)},
+		storage:          &storage{},
 	}
 	if err := s.RegisterHandlers(s.Setup, s.SaveWebpage, s.Retrieve); err != nil {
 		log.Error(err, "Couldn't register messages")

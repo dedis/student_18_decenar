@@ -1,6 +1,10 @@
 package protocol
 
 import (
+	"errors"
+	"sync"
+	"time"
+
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/network"
 
@@ -23,8 +27,8 @@ type Decrypt struct {
 
 	Partials map[int][]kyber.Point // Parials to return
 	Finished chan bool             // Flag to signal protocol termination.
-
-	nextNodeInCircuit *onet.TreeNode // Next node in the circuit
+	doneOnce sync.Once
+	timeout  *time.Timer
 }
 
 func init() {
@@ -33,28 +37,37 @@ func init() {
 }
 
 // NewDecrypt initializes the protocol object and registers all the handlers.
-func NewDecrypt(node *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
-	decrypt := &Decrypt{TreeNodeInstance: node, Finished: make(chan bool, 1), Partials: make(map[int][]kyber.Point)}
-
-	// determine next node
-	var nodeList = node.Tree().List()
-	for i, n := range nodeList {
-		if node.TreeNode().Equal(n) {
-			// last node will be root
-			decrypt.nextNodeInCircuit = nodeList[(i+1)%len(nodeList)]
-			break
-		}
+func NewDecrypt(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
+	d := &Decrypt{
+		TreeNodeInstance: n,
+		Finished:         make(chan bool, 1),
+		Partials:         make(map[int][]kyber.Point),
 	}
 
-	decrypt.RegisterHandlers(decrypt.HandlePrompt, decrypt.HandlePartial)
-	return decrypt, nil
+	err := d.RegisterHandlers(d.HandlePrompt, d.HandlePartial)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // Start is called on the root node prompting it to send itself a Prompt message.
 func (d *Decrypt) Start() error {
-	errors := d.Broadcast(&PromptDecrypt{d.EncryptedCBFSet})
-	if errors != nil {
-		return errors[0]
+	log.Lvl3("Starting decrypt protocol")
+	log.Lvl3("Starting decrypt protocol")
+	// set timeout
+	d.timeout = time.AfterFunc(10*time.Minute, func() {
+		log.Lvl1("decrypt protocol timeout")
+		d.finish(false)
+	})
+
+	// broadcast request
+	errs := d.Broadcast(&PromptDecrypt{
+		EncryptedCBFSet: d.EncryptedCBFSet,
+	})
+	if len(errs) > int(d.Threshold) {
+		log.Errorf("Some nodes failed with error(s) %v", errs)
+		return errors.New("too many nodes failed in broadcast")
 	}
 
 	return nil
@@ -63,6 +76,7 @@ func (d *Decrypt) Start() error {
 // HandlePrompt retrieves the mixes, verifies them and performs a partial decryption
 // on the last mix before appending it to the election skipchain.
 func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
+	log.Lvl3(d.Name() + ": starting getting its partials")
 	defer d.Done()
 
 	// partially decrypt
@@ -76,7 +90,7 @@ func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
 func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
 	// handle the case in which a conode refuses to send its partial
 	if reply.Partial == nil {
-		log.Lvl2("Node", reply.ServerIdentity, "refused to reply")
+		log.Lvl1("Node", reply.ServerIdentity, "refused to reply")
 		d.Failures++
 		if d.Failures > len(d.Roster().List)-int(d.Threshold) {
 			log.Lvl2(reply.ServerIdentity, "couldn't get enough shares")
@@ -96,8 +110,15 @@ func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
 
 // finish terminates the protocol within onet.
 func (d *Decrypt) finish(result bool) {
-	d.Done()
-	d.Finished <- result
+	d.timeout.Stop()
+	select {
+	case d.Finished <- result:
+		// suceeded
+	default:
+		// would have blocked because some other call to finish()
+		// beat us.
+	}
+	d.doneOnce.Do(func() { d.Done() })
 }
 
 // getPartials

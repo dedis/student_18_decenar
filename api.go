@@ -9,8 +9,6 @@ This part of the service runs on the client or the app.
 */
 
 import (
-	"strconv"
-	"strings"
 	"time"
 
 	"gopkg.in/dedis/onet.v2"
@@ -54,48 +52,6 @@ func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp.Times = append(resp.Times, "genend;"+time.Now().Format(StatTimeFormat))
-	log.Lvl1("ttime: begin")
-	csvMap := make(map[string]string)
-	for _, t := range resp.Times {
-		tabl := strings.Split(t, ";")
-		log.Lvl1("ttime:", tabl)
-		csvMap[tabl[0]] = tabl[1]
-	}
-	log.Lvl1(csvMap)
-	csvLine := "web,numConodes,numHtmlNodes,start,reqS,cosi,adds,skip\n"
-	// web, numConodes
-	csvLine += url + "," + csvMap["numbrNodes"] + ","
-	// CBF parameters
-	csvLine += csvMap["mCBF"] + ","
-	csvLine += csvMap["kCBF"] + ","
-	// start (always == 0)
-	t1, _ := time.Parse(StatTimeFormat, csvMap["genstart"])
-	t2, _ := time.Parse(StatTimeFormat, csvMap["genstart"])
-	d := t1.Sub(t2)
-	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
-	// reqS
-	t1, _ = time.Parse(StatTimeFormat, csvMap["saveCosiStart"])
-	t2, _ = time.Parse(StatTimeFormat, csvMap["genstart"])
-	d = t1.Sub(t2)
-	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
-	// cosi
-	t1, _ = time.Parse(StatTimeFormat, csvMap["sameForAddStart"])
-	t2, _ = time.Parse(StatTimeFormat, csvMap["saveCosiStart"])
-	d = t1.Sub(t2)
-	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
-	// adds
-	t1, _ = time.Parse(StatTimeFormat, csvMap["skipAddStart"])
-	t2, _ = time.Parse(StatTimeFormat, csvMap["sameForAddStart"])
-	d = t1.Sub(t2)
-	csvLine += strconv.Itoa(int(d.Nanoseconds())) + ","
-	// skip
-	t1, _ = time.Parse(StatTimeFormat, csvMap["genend"])
-	t2, _ = time.Parse(StatTimeFormat, csvMap["skipAddStart"])
-	d = t1.Sub(t2)
-	csvLine += strconv.Itoa(int(d.Nanoseconds()))
-	log.Lvl1(csvLine)
-	log.Lvl1("ttime: end")
 	return resp, nil
 }
 

@@ -1,4 +1,4 @@
-package simulation
+package main
 
 import (
 	"github.com/BurntSushi/toml"
@@ -55,7 +55,7 @@ func (s *SimulationService) Node(config *onet.SimulationConfig) error {
 
 func (s *SimulationService) Run(config *onet.SimulationConfig) error {
 	size := config.Tree.Size()
-	log.Lvl2("Size is:", size)
+	log.Lvl1("Size is:", size)
 	c := decenarch.NewClient()
 	round := monitor.NewTimeMeasure("round")
 
@@ -66,7 +66,7 @@ func (s *SimulationService) Run(config *onet.SimulationConfig) error {
 	}
 
 	// save
-	_, err = c.Save(config.Roster, "http://nibelung.ch/decenarch")
+	_, err = c.Save(config.Roster, "http://nibelung.ch/decenarch/100p.html")
 	if err != nil {
 		log.Error(err)
 	}

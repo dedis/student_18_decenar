@@ -14,11 +14,14 @@ import (
 func TestService(t *testing.T) {
 	local := onet.NewLocalTest(cothority.Suite)
 	defer local.CloseAll()
-	nodes, roster, _ := local.GenBigTree(3, 3, 1, true)
+	nodes, roster, _ := local.GenBigTree(6, 6, 1, true)
 	s0 := local.GetServices(nodes, serviceID)[0].(*Service)
 	s1 := local.GetServices(nodes, serviceID)[1].(*Service)
 	s2 := local.GetServices(nodes, serviceID)[2].(*Service)
-	services := []*Service{s0, s1, s2}
+	s3 := local.GetServices(nodes, serviceID)[3].(*Service)
+	s4 := local.GetServices(nodes, serviceID)[4].(*Service)
+	s5 := local.GetServices(nodes, serviceID)[5].(*Service)
+	services := []*Service{s0, s1, s2, s3, s4, s5}
 
 	// setup
 	setupResponse, err := s0.Setup(&decenarch.SetupRequest{Roster: roster})
