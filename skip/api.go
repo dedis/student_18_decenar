@@ -9,10 +9,13 @@ This part of the service runs on the client or the app.
 */
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -67,8 +70,21 @@ func (c *SkipClient) SkipAddData(genesisID skipchain.SkipBlockID, r *onet.Roster
 			return nil, vsErr
 		}
 	}
+
 	// marshal data
 	dataBytes, err := webstoreExtractAndConvert(data)
+	if err != nil {
+		return nil, err
+	}
+
+	// compress datai using gzip
+	var b bytes.Buffer
+	w := gzip.NewWriter(&b)
+	_, err = w.Write(dataBytes)
+	if err != nil {
+		return nil, err
+	}
+	err = w.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +98,7 @@ func (c *SkipClient) SkipAddData(genesisID skipchain.SkipBlockID, r *onet.Roster
 	// target is a skipblock, where new skipblock is going to be added
 	// after it, but not necessarily immediately after it.  The caller
 	// should use the genesis skipblock as the target.
-	return c.StoreSkipBlock(genesis, r, dataBytes)
+	return c.StoreSkipBlock(genesis, r, b.Bytes())
 }
 
 // SkipGetData allow to get the data related to the url at the time given that
@@ -121,8 +137,20 @@ func (c *SkipClient) SkipGetData(latestID skipchain.SkipBlockID, r *onet.Roster,
 		}
 
 		log.Lvl4("Test with block:", block)
+
+		// decompress data stored in block
+		rData := bytes.NewReader(block.Data)
+		rz, err := gzip.NewReader(rData)
+		if err != nil {
+			return nil, err
+		}
+		decompressedData, err := ioutil.ReadAll(rz)
+		if err != nil {
+			return nil, err
+		}
+
 		// test if data contains the correct (url,timestamp) couple
-		webs, err := webstoreCompleteFromBytes(block.Data)
+		webs, err := webstoreCompleteFromBytes(decompressedData)
 		if err != nil {
 			return nil, err
 		}
