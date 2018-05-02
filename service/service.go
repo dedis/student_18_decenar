@@ -55,9 +55,6 @@ type Service struct {
 	LocalHTMLTree *html.Node // HTML tree received by this node
 	Leaves        []string   // unique leaves of the HTML tree
 
-	// TODO: what to store here and what put into the storage?
-	LatestID skipchain.SkipBlockID
-
 	storage *storage
 }
 
@@ -68,6 +65,7 @@ var storageID = []byte("main")
 type storage struct {
 	sync.Mutex
 	GenesisID      skipchain.SkipBlockID
+	LatestID       skipchain.SkipBlockID
 	Threshold      uint32
 	Key            kyber.Point // Key assigned by the DKG.
 	Secret         *lib.SharedSecret
@@ -84,15 +82,21 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	s.storage.Unlock()
 	s.save()
 
-	// start skipchain
-	client := skip.NewSkipClient(int(s.threshold()))
-	genesis, err := client.SkipStart(req.Roster)
+	// start a new skipchain only if there isn't one already
+	if s.genesisID() == nil {
+		client := skip.NewSkipClient(int(s.threshold()))
+		genesis, err := client.SkipStart(req.Roster)
+		if err != nil {
+			return nil, err
+		}
 
-	// store genesis ID
-	s.storage.Lock()
-	s.storage.GenesisID = genesis.Hash
-	s.storage.Unlock()
-	s.save()
+		// store genesisID and latestID
+		s.storage.Lock()
+		s.storage.GenesisID = genesis.Hash
+		s.storage.LatestID = genesis.Hash // latest know block is genesis at the beginning
+		s.storage.Unlock()
+		s.save()
+	}
 
 	// run DKG protocol
 	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
@@ -278,7 +282,10 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	}
 
 	// store latest block ID for retrieval
-	s.LatestID = resp.Latest.Hash
+	s.storage.Lock()
+	s.storage.LatestID = resp.Latest.Hash
+	s.storage.Unlock()
+	s.save()
 
 	return &decenarch.SaveResponse{Times: stattimes}, nil
 }
@@ -435,7 +442,7 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
 	skipclient := skip.NewSkipClient(int(s.threshold()))
-	resp, err := skipclient.SkipGetData(s.LatestID, req.Roster, req.Url, req.Timestamp)
+	resp, err := skipclient.SkipGetData(s.latestID(), req.Roster, req.Url, req.Timestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -583,6 +590,13 @@ func (s *Service) completeProofs() lib.CompleteProofs {
 // uniqueLeaves
 func (s *Service) uniqueLeaves() []string {
 	return s.Leaves
+}
+
+// latestID
+func (s *Service) latestID() skipchain.SkipBlockID {
+	s.storage.Lock()
+	defer s.storage.Unlock()
+	return s.storage.LatestID
 }
 
 // genesisID
