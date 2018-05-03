@@ -16,7 +16,6 @@ import (
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
-	"strings"
 
 	"golang.org/x/net/html"
 
@@ -79,20 +78,29 @@ func NewConsensusStructuredProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInst
 // only by the leader, i.e. root of the tree
 func (p *ConsensusStructuredState) Start() error {
 	log.Lvl3("Starting SaveLocalState")
+
+	// get tree for the root
 	tree, err := p.GetLocalHTMLData()
 	if err != nil {
 		log.Error("Error in save protocol Start():", err)
 		return err
 	}
 	p.LocalTree = tree
+
+	// compute and store CBF parameters
 	paramCBF := lib.GetOptimalCBFParametersToSend(tree)
-	return p.HandleAnnounce(StructSaveAnnounceStructured{
-		p.TreeNode(),
-		SaveAnnounceStructured{
-			Url:           p.Url,
-			ParametersCBF: paramCBF,
-		},
+	p.ParametersCBF = castParametersCBF(paramCBF)
+
+	// send announcement to all conodes
+	errs := p.Broadcast(&SaveAnnounceStructured{
+		Url:           p.Url,
+		ParametersCBF: paramCBF,
 	})
+	if len(errs) > 0 {
+		return lib.ConcatenateErrors(errs)
+	}
+
+	return nil
 }
 
 // HandleAnnounce is the message going down the tree
@@ -104,25 +112,20 @@ func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructur
 	log.Lvl4("Handling", p)
 	log.Lvl4("And the message", msg)
 	p.Url = msg.SaveAnnounceStructured.Url
-	// retrieve data again because the Start() function is run only by root
-	// and all the nodes need the three and the hash
-	if !p.IsRoot() {
-		tree, err := p.GetLocalHTMLData()
-		if err != nil {
-			log.Error("Error in save protocol HandleAnnounce():", err)
-			return err
-		}
-		p.LocalTree = tree
+
+	// get local version of the webpage
+	tree, err := p.GetLocalHTMLData()
+	if err != nil {
+		log.Error("Error in save protocol HandleAnnounce():", err)
+		return err
 	}
+	p.LocalTree = tree
 
 	// get CBF parameters
 	p.ParametersCBF = castParametersCBF(msg.SaveAnnounceStructured.ParametersCBF)
 
-	// propagate the message if we aren't in a leaf, start the
-	// reply process otherwise
-	if !p.IsLeaf() {
-		p.SendToChildren(&msg.SaveAnnounceStructured)
-	} else {
+	// if we are in a leaf, we start the bottom-up part of the protocol
+	if p.IsLeaf() {
 		resp := StructSaveReplyStructured{
 			p.TreeNode(),
 			SaveReplyStructured{
@@ -166,11 +169,7 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 	log.Lvl4("Consensus reach root, now send complete proofs to all conodes")
 	errs := p.Broadcast(&CompleteProofsAnnounce{p.CompleteProofs})
 	if len(errs) > 0 {
-		var errsStrings []string
-		for _, e := range errs {
-			errsStrings = append(errsStrings, e.Error())
-		}
-		return errors.New(strings.Join(errsStrings, "\n"))
+		return lib.ConcatenateErrors(errs)
 	}
 
 	// root is done

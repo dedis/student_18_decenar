@@ -2,6 +2,7 @@ package lib
 
 import (
 	"errors"
+	"strings"
 
 	decenarch "github.com/dedis/student_18_decenar"
 	"golang.org/x/net/html"
@@ -134,4 +135,15 @@ func ListUniqueDataLeaves(root *html.Node) []string {
 	}
 	f(root)
 	return leaves
+}
+
+// ConcatenateErrors take a slice of errors an return a single error which is
+// the concatenation of all the errors contained in the slice
+func ConcatenateErrors(errs []error) error {
+	var errsString []string
+	for _, e := range errs {
+		errsString = append(errsString, e.Error())
+	}
+
+	return errors.New(strings.Join(errsString, "\n"))
 }
