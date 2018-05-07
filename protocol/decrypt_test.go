@@ -65,7 +65,7 @@ func runDecrypt(t *testing.T, n int) {
 	key := shared.X
 
 	// compute threshold
-	threshold := uint32(n - (n-1)/3)
+	threshold := int32(n - (n-1)/3)
 
 	// encrypt random vector. Note that proof is tested somewhere else
 	cipher, _ := lib.EncryptIntVector(key, []int64{0, 1, 0})

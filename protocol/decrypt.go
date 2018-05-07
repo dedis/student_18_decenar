@@ -19,8 +19,8 @@ const NameDecrypt = "decrypt"
 // Decrypt is the core structure of the protocol.
 type Decrypt struct {
 	*onet.TreeNodeInstance
-	Threshold uint32 // How many replies are needed to re-create the secret
-	Failures  int    // How many failures occured so far
+	Threshold int32 // How many replies are needed to re-create the secret
+	Failures  int   // How many failures occured so far
 
 	Secret          *lib.SharedSecret // Secret is the private key share from the DKG.
 	EncryptedCBFSet *lib.CipherVector // Election to be decrypted.
@@ -29,6 +29,7 @@ type Decrypt struct {
 	Finished chan bool             // Flag to signal protocol termination.
 	doneOnce sync.Once
 	timeout  *time.Timer
+	mutex    sync.Mutex
 }
 
 func init() {
@@ -54,7 +55,6 @@ func NewDecrypt(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 // Start is called on the root node prompting it to send itself a Prompt message.
 func (d *Decrypt) Start() error {
 	log.Lvl3("Starting decrypt protocol")
-	log.Lvl3("Starting decrypt protocol")
 	// set timeout
 	d.timeout = time.AfterFunc(10*time.Minute, func() {
 		log.Lvl1("decrypt protocol timeout")
@@ -76,7 +76,7 @@ func (d *Decrypt) Start() error {
 // HandlePrompt retrieves the mixes, verifies them and performs a partial decryption
 // on the last mix before appending it to the election skipchain.
 func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
-	log.Lvl3(d.Name() + ": starting getting its partials")
+	log.Lvl3(d.Name() + ": sending partials to root")
 	defer d.Done()
 
 	// partially decrypt
@@ -99,11 +99,14 @@ func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
 		return nil
 	}
 
+	log.LLvl3(d.ServerIdentity().Address, "got partials from", reply.Name(), "partials", len(d.Partials), "threshold", int(d.Threshold-1))
+	d.mutex.Lock()
 	d.Partials[reply.RosterIndex] = reply.Partial
 	if len(d.Partials) >= int(d.Threshold-1) {
 		d.Partials[d.Index()] = d.getPartials(d.EncryptedCBFSet)
 		d.finish(true)
 	}
+	d.mutex.Unlock()
 
 	return nil
 }
@@ -113,8 +116,9 @@ func (d *Decrypt) finish(result bool) {
 	d.timeout.Stop()
 	select {
 	case d.Finished <- result:
-		// suceeded
+		// decrypt protocol suceeded
 	default:
+		// source https://github.com/dedis/cothority/blob/master/ocs/protocol/ocs.go
 		// would have blocked because some other call to finish()
 		// beat us.
 	}

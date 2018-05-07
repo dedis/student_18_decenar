@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dedis/student_18_decenar/lib"
 	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/kyber.v2"
 	dkg "gopkg.in/dedis/kyber.v2/share/dkg/rabin"
@@ -32,9 +31,9 @@ type SetupDKG struct {
 	keypair *key.Pair
 	publics []kyber.Point
 	// Whether we started the `DKG.SecretCommits`
-	commit   bool
-	Wait     bool
-	Finished chan bool
+	commit bool
+	Wait   bool
+	Done   chan bool
 
 	structStartDeal    chan structStartDeal
 	structDeal         chan structDeal
@@ -49,7 +48,8 @@ func NewSetupDKG(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	o := &SetupDKG{
 		TreeNodeInstance: n,
 		keypair:          key.NewKeyPair(cothority.Suite),
-		Finished:         make(chan bool, 1),
+		Done:             make(chan bool, 1),
+		Threshold:        uint32(len(n.Roster().List) - (len(n.Roster().List)-1)/3),
 		nodes:            n.List(),
 	}
 
@@ -116,18 +116,12 @@ func (o *SetupDKG) Dispatch() error {
 	}
 
 	if o.DKG.Finished() {
-		o.Finished <- true
+		o.Done <- true
 		return nil
 	}
 	err = errors.New("protocol is finished but dkg is not")
 	log.Error(err)
 	return err
-}
-
-// SharedSecret returns the necessary information for doing shared
-// encryption and decryption.
-func (o *SetupDKG) SharedSecret() (*lib.SharedSecret, error) {
-	return lib.NewSharedSecret(o.DKG)
 }
 
 // Children reactions

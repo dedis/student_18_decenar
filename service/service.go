@@ -14,13 +14,15 @@ import (
 	"time"
 
 	"encoding/base64"
-	"golang.org/x/net/html"
 	urlpkg "net/url"
+
+	"golang.org/x/net/html"
 
 	decenarch "github.com/dedis/student_18_decenar"
 	"github.com/dedis/student_18_decenar/lib"
 	"github.com/dedis/student_18_decenar/protocol"
 	skip "github.com/dedis/student_18_decenar/skip"
+	"gopkg.in/dedis/cothority.v2/messaging"
 
 	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosi/protocol"
 	ftcosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
@@ -34,16 +36,16 @@ import (
 )
 
 // Used for tests
-var serviceID onet.ServiceID
+var templateID onet.ServiceID
 
 // timeout for protocol termination.
-const timeout = 60 * time.Minute
+const timeout = 10 * time.Second
 
 func init() {
 	var err error
-	serviceID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
+	templateID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
 	log.ErrFatal(err)
-	network.RegisterMessage(&storage{})
+	network.RegisterMessages(storage{}, SetupPropagation{})
 }
 
 // Service is our template-service
@@ -51,6 +53,8 @@ type Service struct {
 	// We need to embed the ServiceProcessor, so that incoming messages
 	// are correctly handled.
 	*onet.ServiceProcessor
+
+	propagateSetup messaging.PropagationFunc
 
 	LocalHTMLTree *html.Node // HTML tree received by this node
 	Leaves        []string   // unique leaves of the HTML tree
@@ -60,16 +64,20 @@ type Service struct {
 
 // storageID reflects the data we're storing - we could store more
 // than one structure.
-var storageID = []byte("main")
+var storageID = []byte("storage")
 
 type storage struct {
 	sync.Mutex
 	GenesisID      skipchain.SkipBlockID
 	LatestID       skipchain.SkipBlockID
-	Threshold      uint32
-	Key            kyber.Point // Key assigned by the DKG.
+	Threshold      int32
 	Secret         *lib.SharedSecret
 	CompleteProofs lib.CompleteProofs
+}
+
+type SetupPropagation struct {
+	GenesisID skipchain.SkipBlockID
+	Threshold int32
 }
 
 // Setup is the function called by the service to setup everything is needed
@@ -78,7 +86,7 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	// compute and store threshold. This threshold will be used also by the
 	// other conodes of the roster
 	s.storage.Lock()
-	s.storage.Threshold = uint32(len(req.Roster.List) - (len(req.Roster.List)-1)/3)
+	s.storage.Threshold = int32(len(req.Roster.List) - (len(req.Roster.List)-1)/3)
 	s.storage.Unlock()
 	s.save()
 
@@ -98,9 +106,20 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 		s.save()
 	}
 
+	// propagate setup
+	threshold := int32(len(req.Roster.List) - (len(req.Roster.List)-1)/3)
+	replies, err := s.propagateSetup(req.Roster, &SetupPropagation{s.genesisID(), threshold}, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	if replies != len(req.Roster.List) {
+		log.Lvl1("Got only", replies, "replies for setup-propagation")
+	}
+
 	// run DKG protocol
 	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
 	tree := root.GenerateNaryTree(len(req.Roster.List))
+	log.Print("Tree ", tree.Dump())
 	if tree == nil {
 		return nil, errors.New("error while creating the tree for the DKG protocol")
 	}
@@ -111,7 +130,7 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 		return nil, err
 	}
 	protocol := instance.(*protocol.SetupDKG)
-	protocol.Threshold = s.threshold()
+	protocol.Wait = true
 
 	err = protocol.Start()
 	if err != nil {
@@ -119,19 +138,19 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	}
 
 	select {
-	case <-protocol.Finished:
-		secret, err := protocol.SharedSecret()
+	case <-protocol.Done:
+		secret, err := lib.NewSharedSecret(protocol.DKG)
 		if err != nil {
 			return nil, err
 		}
 		s.storage.Lock()
-		s.storage.Key = secret.X
 		s.storage.Secret = secret
 		s.storage.Unlock()
 		s.save()
+
 		return &decenarch.SetupResponse{Key: secret.X}, nil
 	case <-time.After(timeout):
-		return nil, errors.New("open error, protocol timeout")
+		return nil, errors.New("dkg didn't finish in time")
 	}
 }
 
@@ -142,9 +161,8 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	log.Lvl3("Decenarch Service new SaveWebpage")
 
 	// create the tree
-	numNodes := len(req.Roster.List)
 	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
-	tree := root.GenerateNaryTree(numNodes)
+	tree := root.GenerateNaryTree(len(req.Roster.List))
 	if tree == nil {
 		return nil, errors.New("error while creating the tree for the consensus protocol")
 	}
@@ -236,7 +254,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		}
 		unstructuredConsensusProtocol := api.(*protocol.ConsensusUnstructuredState)
 		unstructuredConsensusProtocol.Url = al
-		unstructuredConsensusProtocol.Threshold = s.threshold()
+		unstructuredConsensusProtocol.Threshold = uint32(s.threshold())
 		err = api.Start()
 		if err != nil {
 			return nil, err
@@ -299,6 +317,7 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	pi.(*protocol.Decrypt).EncryptedCBFSet = encryptedCBFSet
 	pi.(*protocol.Decrypt).Secret = s.secret()
 	pi.(*protocol.Decrypt).Threshold = s.threshold()
+	log.Print("In the service: ", s.ServerIdentity().Address)
 	err = p.Start()
 	if err != nil {
 		return nil, err
@@ -307,11 +326,12 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	if !<-p.Finished {
 		return nil, errors.New("decrypt error, impossible to ge partials")
 	}
-	log.Lvl3("Decryption protocol is done.")
+	log.LLvl3("Decryption protocol is done.")
 	return p.Partials, nil
 }
 
 func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) ([]byte, error) {
+	log.Print("Starting reconstruct")
 	points := make([]kyber.Point, 0)
 	n := len(partials)
 	for i := 0; i < len(partials[0]); i++ {
@@ -335,6 +355,8 @@ func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.No
 	if err != nil {
 		return nil, err
 	}
+
+	log.Print("Reconstruct terminated")
 
 	return htmlPage, nil
 }
@@ -384,6 +406,7 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, structured bool) (*ftcosi
 			return nil, err
 		}
 	} else {
+		// protocol instance
 		pi, err = s.CreateProtocol(protocol.NameSignUnstructured, t)
 		if err != nil {
 			return nil, err
@@ -507,16 +530,14 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		}
 		proto := instance.(*protocol.SetupDKG)
 		go func() {
-			<-proto.Finished
-			secret, err := proto.SharedSecret()
+			<-proto.Done
+			secret, err := lib.NewSharedSecret(proto.DKG)
 			if err != nil {
 				log.Error(err)
 				return
 			}
 			s.storage.Lock()
-			s.storage.Key = secret.X
 			s.storage.Secret = secret
-			s.storage.Threshold = proto.Threshold // define by the root and valid for all the conodes
 			s.storage.Unlock()
 			s.save()
 		}()
@@ -575,9 +596,8 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			return nil, err
 		}
 		return proto, nil
-	default:
-		return nil, errors.New("protocol error, unknown protocol")
 	}
+	return nil, nil
 }
 
 // completeProofs
@@ -612,7 +632,7 @@ func (s *Service) localHTMLTree() *html.Node {
 }
 
 // threshold
-func (s *Service) threshold() uint32 {
+func (s *Service) threshold() int32 {
 	s.storage.Lock()
 	defer s.storage.Unlock()
 	return s.storage.Threshold
@@ -629,7 +649,20 @@ func (s *Service) secret() *lib.SharedSecret {
 func (s *Service) key() kyber.Point {
 	s.storage.Lock()
 	defer s.storage.Unlock()
-	return s.storage.Key
+	return s.storage.Secret.X
+}
+
+func (s *Service) propagateSetupFunc(setupMessage network.Message) {
+	m, ok := setupMessage.(*SetupPropagation)
+	if !ok {
+		log.Error("got something else than a setup propagation message")
+		return
+	}
+	s.storage.Lock()
+	s.storage.GenesisID = m.GenesisID
+	s.storage.Threshold = m.Threshold
+	s.storage.Unlock()
+	s.save()
 }
 
 // saves all skipblocks.
@@ -659,7 +692,7 @@ func (s *Service) tryLoad() error {
 	var ok bool
 	s.storage, ok = msg.(*storage)
 	if !ok {
-		return errors.New("Data of wrong type")
+		return errors.New("service error: could not unmarshal storage")
 	}
 	return nil
 }
@@ -680,6 +713,9 @@ func newService(c *onet.Context) (onet.Service, error) {
 		log.Error(err)
 		return nil, err
 	}
+	var err error
+	s.propagateSetup, err = messaging.NewPropagationFunc(c, "PropagateSetup", s.propagateSetupFunc, -1)
+	log.ErrFatal(err)
 	return s, nil
 }
 

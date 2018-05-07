@@ -31,14 +31,13 @@ func setupDKG(t *testing.T, nbrNodes int) {
 	pi, err := local.CreateProtocol(NameDKG, tree)
 	protocol := pi.(*SetupDKG)
 	protocol.Wait = true
-	protocol.Threshold = uint32(tree.Size() - (tree.Size()-1)/3)
 	if err != nil {
 		t.Fatal("Couldn't start protocol:", err)
 	}
 	log.ErrFatal(pi.Start())
 	timeout := network.WaitRetry * time.Duration(network.MaxRetryConnect*nbrNodes*2) * time.Millisecond
 	select {
-	case <-protocol.Finished:
+	case <-protocol.Done:
 		log.Lvl2("root-node is Done")
 		require.NotNil(t, protocol.DKG)
 	case <-time.After(timeout):
