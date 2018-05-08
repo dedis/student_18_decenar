@@ -12,7 +12,6 @@ node will only use the `Handle`-methods, and not call `Start` again.
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
@@ -151,7 +150,10 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 	if err != nil {
 		return err
 	}
-	// consensus reach root
+
+	// aggregate errors
+	p.AggregateErrors(reply)
+
 	if !p.IsRoot() {
 		log.Lvl4("Sending Consensus to Parent")
 		resp := SaveReplyStructured{
@@ -277,16 +279,6 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 	// that the set contains only zeros and ones
 	p.EncryptedCBFSet, p.CompleteProofs[pubKeyString].CipherVectorProof = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
 
-	// add encrypted CBF set and its signature to the proof material of
-	// this conode
-	p.CompleteProofs[pubKeyString].EncryptedCBFSet = p.EncryptedCBFSet
-	sig, err := p.signEncryptedCBFSet()
-	if err != nil {
-		fmt.Println("Problema nel sign")
-		return err
-	}
-	p.CompleteProofs[pubKeyString].EncryptedCBFSetSignature = sig
-
 	// aggregate children contributions after checking the signature
 	childrenContributions := make(map[string]*lib.CipherVector)
 	if !p.IsLeaf() {
@@ -313,6 +305,18 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 		// add local aggregation proof
 		p.CompleteProofs[pubKeyString].AggregationProof = lib.CreateAggregationiProof(childrenContributions, p.EncryptedCBFSet)
 	}
+
+	// add encrypted CBF set and its signature to the proof material of
+	// this conode. The signature should be added here because we have to
+	// take into account the addition for the non leaf nodes. If the node
+	// isn't a leaf, we skip the addition part, so no problem in signing
+	// the encrypted Bloom filter here
+	p.CompleteProofs[pubKeyString].EncryptedCBFSet = p.EncryptedCBFSet
+	sig, err := p.signEncryptedCBFSet()
+	if err != nil {
+		return err
+	}
+	p.CompleteProofs[pubKeyString].EncryptedCBFSetSignature = sig
 
 	return nil
 }

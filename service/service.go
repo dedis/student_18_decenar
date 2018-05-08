@@ -8,7 +8,6 @@ runs on the node.
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -39,13 +38,13 @@ import (
 var templateID onet.ServiceID
 
 // timeout for protocol termination.
-const timeout = 10 * time.Second
+const timeout = 24 * time.Hour
 
 func init() {
 	var err error
 	templateID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
 	log.ErrFatal(err)
-	network.RegisterMessages(storage{}, SetupPropagation{})
+	network.RegisterMessages(&Storage{}, SetupPropagation{})
 }
 
 // Service is our template-service
@@ -59,14 +58,14 @@ type Service struct {
 	LocalHTMLTree *html.Node // HTML tree received by this node
 	Leaves        []string   // unique leaves of the HTML tree
 
-	storage *storage
+	Storage *Storage
 }
 
 // storageID reflects the data we're storing - we could store more
 // than one structure.
 var storageID = []byte("storage")
 
-type storage struct {
+type Storage struct {
 	sync.Mutex
 	GenesisID      skipchain.SkipBlockID
 	LatestID       skipchain.SkipBlockID
@@ -85,9 +84,9 @@ type SetupPropagation struct {
 func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, error) {
 	// compute and store threshold. This threshold will be used also by the
 	// other conodes of the roster
-	s.storage.Lock()
-	s.storage.Threshold = int32(len(req.Roster.List) - (len(req.Roster.List)-1)/3)
-	s.storage.Unlock()
+	s.Storage.Lock()
+	s.Storage.Threshold = int32(len(req.Roster.List) - (len(req.Roster.List)-1)/3)
+	s.Storage.Unlock()
 	s.save()
 
 	// start a new skipchain only if there isn't one already
@@ -99,10 +98,10 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 		}
 
 		// store genesisID and latestID
-		s.storage.Lock()
-		s.storage.GenesisID = genesis.Hash
-		s.storage.LatestID = genesis.Hash // latest know block is genesis at the beginning
-		s.storage.Unlock()
+		s.Storage.Lock()
+		s.Storage.GenesisID = genesis.Hash
+		s.Storage.LatestID = genesis.Hash // latest know block is genesis at the beginning
+		s.Storage.Unlock()
 		s.save()
 	}
 
@@ -119,7 +118,6 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	// run DKG protocol
 	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
 	tree := root.GenerateNaryTree(len(req.Roster.List))
-	log.Print("Tree ", tree.Dump())
 	if tree == nil {
 		return nil, errors.New("error while creating the tree for the DKG protocol")
 	}
@@ -143,9 +141,9 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 		if err != nil {
 			return nil, err
 		}
-		s.storage.Lock()
-		s.storage.Secret = secret
-		s.storage.Unlock()
+		s.Storage.Lock()
+		s.Storage.Secret = secret
+		s.Storage.Unlock()
 		s.save()
 
 		return &decenarch.SetupResponse{Key: secret.X}, nil
@@ -161,8 +159,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	log.Lvl3("Decenarch Service new SaveWebpage")
 
 	// create the tree
-	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
-	tree := root.GenerateNaryTree(len(req.Roster.List))
+	tree := req.Roster.GenerateBinaryTree()
 	if tree == nil {
 		return nil, errors.New("error while creating the tree for the consensus protocol")
 	}
@@ -198,9 +195,9 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 		// get complete proofs of the whole consensus over structured
 		// data protocol
-		s.storage.Lock()
-		s.storage.CompleteProofs = structuredConsensusProtocol.CompleteProofsToSend
-		s.storage.Unlock()
+		s.Storage.Lock()
+		s.Storage.CompleteProofs = structuredConsensusProtocol.CompleteProofsToSend
+		s.Storage.Unlock()
 		s.save()
 
 		// run decryt protocol
@@ -210,7 +207,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		}
 
 		// reconstruct html page
-		msgToSign, err := s.reconstruct(partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
+		msgToSign, err := s.reconstruct(len(req.Roster.List), partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
 		if err != nil {
 			return nil, err
 		}
@@ -300,9 +297,9 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	}
 
 	// store latest block ID for retrieval
-	s.storage.Lock()
-	s.storage.LatestID = resp.Latest.Hash
-	s.storage.Unlock()
+	s.Storage.Lock()
+	s.Storage.LatestID = resp.Latest.Hash
+	s.Storage.Unlock()
 	s.save()
 
 	return &decenarch.SaveResponse{Times: stattimes}, nil
@@ -317,7 +314,6 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	pi.(*protocol.Decrypt).EncryptedCBFSet = encryptedCBFSet
 	pi.(*protocol.Decrypt).Secret = s.secret()
 	pi.(*protocol.Decrypt).Threshold = s.threshold()
-	log.Print("In the service: ", s.ServerIdentity().Address)
 	err = p.Start()
 	if err != nil {
 		return nil, err
@@ -326,20 +322,22 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	if !<-p.Finished {
 		return nil, errors.New("decrypt error, impossible to ge partials")
 	}
-	log.LLvl3("Decryption protocol is done.")
+	log.Lvl3("Decryption protocol is done.")
 	return p.Partials, nil
 }
 
-func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) ([]byte, error) {
-	log.Print("Starting reconstruct")
+func (s *Service) reconstruct(nodes int, partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) ([]byte, error) {
 	points := make([]kyber.Point, 0)
-	n := len(partials)
+	n := nodes
 	for i := 0; i < len(partials[0]); i++ {
 		shares := make([]*share.PubShare, n)
 		for j, partial := range partials {
 			shares[j] = &share.PubShare{I: j, V: partial[i]}
 		}
-		message, _ := share.RecoverCommit(decenarch.Suite, shares, n, n)
+		message, err := share.RecoverCommit(decenarch.Suite, shares, int(s.threshold()), n)
+		if err != nil {
+			return nil, err
+		}
 		points = append(points, message)
 	}
 
@@ -355,8 +353,6 @@ func (s *Service) reconstruct(partials map[int][]kyber.Point, localTree *html.No
 	if err != nil {
 		return nil, err
 	}
-
-	log.Print("Reconstruct terminated")
 
 	return htmlPage, nil
 }
@@ -425,7 +421,8 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, structured bool) (*ftcosi
 	}
 	// Timeout is not a global timeout for the protocol, but a timeout used
 	// for waiting for responses for sub protocols.
-	p.Timeout = time.Second * 5
+	//p.Timeout = time.Second * 5
+	p.Timeout = time.Minute * 5
 
 	// add data for verification depending on what we want to sign
 	if structured {
@@ -448,8 +445,7 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, structured bool) (*ftcosi
 	select {
 	case sig = <-p.FinalSignature:
 	case <-time.After(p.Timeout*5 + time.Second):
-		fmt.Println("Timeout")
-		return nil, errors.New("protocol timed out")
+		return nil, errors.New("signature protocol timed out")
 	}
 
 	//The hash is the message ftcosi actually signs, we recompute it the
@@ -536,9 +532,9 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 				log.Error(err)
 				return
 			}
-			s.storage.Lock()
-			s.storage.Secret = secret
-			s.storage.Unlock()
+			s.Storage.Lock()
+			s.Storage.Secret = secret
+			s.Storage.Unlock()
 			s.save()
 		}()
 		return proto, nil
@@ -554,9 +550,9 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			// get local HTML of the conode for later verification of the
 			// proposed consensus HTML page
 			s.Leaves = lib.ListUniqueDataLeaves(proto.LocalTree)
-			s.storage.Lock()
-			s.storage.CompleteProofs = proto.CompleteProofsToSend
-			s.storage.Unlock()
+			s.Storage.Lock()
+			s.Storage.CompleteProofs = proto.CompleteProofsToSend
+			s.Storage.Unlock()
 			s.save()
 		}()
 		return proto, nil
@@ -602,9 +598,9 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 
 // completeProofs
 func (s *Service) completeProofs() lib.CompleteProofs {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.CompleteProofs
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
+	return s.Storage.CompleteProofs
 }
 
 // uniqueLeaves
@@ -614,16 +610,16 @@ func (s *Service) uniqueLeaves() []string {
 
 // latestID
 func (s *Service) latestID() skipchain.SkipBlockID {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.LatestID
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
+	return s.Storage.LatestID
 }
 
 // genesisID
 func (s *Service) genesisID() skipchain.SkipBlockID {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.GenesisID
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
+	return s.Storage.GenesisID
 }
 
 // LocalHTMLTree
@@ -633,23 +629,23 @@ func (s *Service) localHTMLTree() *html.Node {
 
 // threshold
 func (s *Service) threshold() int32 {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.Threshold
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
+	return s.Storage.Threshold
 }
 
 // secret returns the shared secret for a given election.
 func (s *Service) secret() *lib.SharedSecret {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.Secret
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
+	return s.Storage.Secret
 }
 
 // key returns the key given by DKG
 func (s *Service) key() kyber.Point {
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	return s.storage.Secret.X
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
+	return s.Storage.Secret.X
 }
 
 func (s *Service) propagateSetupFunc(setupMessage network.Message) {
@@ -658,19 +654,19 @@ func (s *Service) propagateSetupFunc(setupMessage network.Message) {
 		log.Error("got something else than a setup propagation message")
 		return
 	}
-	s.storage.Lock()
-	s.storage.GenesisID = m.GenesisID
-	s.storage.Threshold = m.Threshold
-	s.storage.Unlock()
+	s.Storage.Lock()
+	s.Storage.GenesisID = m.GenesisID
+	s.Storage.Threshold = m.Threshold
+	s.Storage.Unlock()
 	s.save()
 }
 
 // saves all skipblocks.
 func (s *Service) save() {
 	log.Lvl3(s.String(), "Saving Service")
-	s.storage.Lock()
-	defer s.storage.Unlock()
-	err := s.Save(storageID, s.storage)
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
+	err := s.Save(storageID, s.Storage)
 	if err != nil {
 		log.Error("Couldn't save file:", err)
 	}
@@ -679,8 +675,8 @@ func (s *Service) save() {
 // Tries to load the configuration and updates the data in the service
 // if it finds a valid config-file.
 func (s *Service) tryLoad() error {
-	s.storage.Lock()
-	defer s.storage.Unlock()
+	s.Storage.Lock()
+	defer s.Storage.Unlock()
 
 	msg, err := s.Load(storageID)
 	if err != nil {
@@ -690,7 +686,7 @@ func (s *Service) tryLoad() error {
 		return nil
 	}
 	var ok bool
-	s.storage, ok = msg.(*storage)
+	s.Storage, ok = msg.(*Storage)
 	if !ok {
 		return errors.New("service error: could not unmarshal storage")
 	}
@@ -703,7 +699,7 @@ func (s *Service) tryLoad() error {
 func newService(c *onet.Context) (onet.Service, error) {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
-		storage:          &storage{},
+		Storage:          &Storage{},
 	}
 	if err := s.RegisterHandlers(s.Setup, s.SaveWebpage, s.Retrieve); err != nil {
 		log.Error(err, "Couldn't register messages")

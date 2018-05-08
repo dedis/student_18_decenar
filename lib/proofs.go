@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"fmt"
 	"reflect"
 
 	decenarch "github.com/dedis/student_18_decenar"
@@ -43,7 +42,6 @@ func (p *CompleteProof) VerifyCompleteProof() bool {
 	hashed := decenarch.Suite.Hash().Sum(bytesEncryptedSet)
 	vErr := schnorr.Verify(decenarch.Suite, p.PublicKey, hashed, p.EncryptedCBFSetSignature)
 	if vErr != nil {
-		fmt.Println(vErr)
 		return false
 	}
 

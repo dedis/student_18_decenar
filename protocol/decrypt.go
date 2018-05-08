@@ -99,7 +99,7 @@ func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
 		return nil
 	}
 
-	log.LLvl3(d.ServerIdentity().Address, "got partials from", reply.Name(), "partials", len(d.Partials), "threshold", int(d.Threshold-1))
+	log.Lvl3(d.ServerIdentity().Address, "got partials from", reply.Name(), "partials", len(d.Partials), "threshold", int(d.Threshold-1))
 	d.mutex.Lock()
 	d.Partials[reply.RosterIndex] = reply.Partial
 	if len(d.Partials) >= int(d.Threshold-1) {

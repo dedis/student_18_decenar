@@ -12,7 +12,7 @@ import (
 const PARALLELIZE = true
 
 // VPARALLELIZE allows to choose the level of parallelization in the vector computations
-const VPARALLELIZE = 100
+const VPARALLELIZE = 50
 
 // just to avoid changing everywhere, at least for the moment
 var SuiTe = decenarch.Suite

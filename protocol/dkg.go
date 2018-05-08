@@ -62,6 +62,12 @@ func NewSetupDKG(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	if err != nil {
 		return nil, err
 	}
+	// wors case is n^2
+	numNodes := len(n.List())
+	err = o.RegisterChannelLength(&o.structResponse, numNodes*numNodes)
+	if err != nil {
+		return nil, err
+	}
 	o.publics = make([]kyber.Point, len(o.nodes))
 	return o, nil
 }

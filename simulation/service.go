@@ -55,7 +55,8 @@ func (s *SimulationService) Node(config *onet.SimulationConfig) error {
 
 func (s *SimulationService) Run(config *onet.SimulationConfig) error {
 	size := config.Tree.Size()
-	log.Lvl1("Size is:", size)
+	log.Lvl1("Tree is:", config.Tree.Dump())
+	log.Lvl3("Size is:", size)
 	c := decenarch.NewClient()
 	round := monitor.NewTimeMeasure("round")
 
@@ -66,8 +67,9 @@ func (s *SimulationService) Run(config *onet.SimulationConfig) error {
 	}
 
 	// save
-	_, err = c.Save(config.Roster, "http://nibelung.ch/decenarch/100p.html")
+	_, err = c.Save(config.Roster, "https://htmlpreview.github.io/?https://github.com/dedis/student_18_decenar/blob/master/simulation/test_input/leaves/32768.html")
 	if err != nil {
+		log.Printf("Error: %#v\n", err)
 		log.Error(err)
 	}
 
