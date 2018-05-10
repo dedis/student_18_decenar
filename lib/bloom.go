@@ -59,7 +59,7 @@ func getOptimalCBFParameters(root *html.Node) []uint {
 		return []uint{0, 0}
 	}
 	uniqueLeaves := uint(len(ListUniqueDataLeaves(root)))
-	m, k := bestParameters(uniqueLeaves, 0.0001)
+	m, k := bestParameters(uniqueLeaves, 0.01)
 
 	return []uint{m, k}
 }

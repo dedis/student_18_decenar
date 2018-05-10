@@ -10,19 +10,19 @@ import (
 )
 
 func init() {
-	onet.SimulationRegister("SimulationService", NewSimulationService)
+	onet.SimulationRegister("LeavesHTML", NewLeavesHTMLSimulation)
 }
 
-type SimulationService struct {
+type LeavesHTMLSimulation struct {
 	onet.SimulationBFTree
 
 	Webpage string
 }
 
-// NewSimulationService returns the new simulation, where all fields are
+// NewLeavesHTMLSimulation returns the new simulation, where all fields are
 // initialised using the config-file
-func NewSimulationService(config string) (onet.Simulation, error) {
-	es := &SimulationService{}
+func NewLeavesHTMLSimulation(config string) (onet.Simulation, error) {
+	es := &LeavesHTMLSimulation{}
 	_, err := toml.Decode(config, es)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func NewSimulationService(config string) (onet.Simulation, error) {
 }
 
 // Setup creates the tree used for that simulation
-func (s *SimulationService) Setup(dir string, hosts []string) (
+func (s *LeavesHTMLSimulation) Setup(dir string, hosts []string) (
 	*onet.SimulationConfig, error) {
 	sc := &onet.SimulationConfig{}
 	s.CreateRoster(sc, hosts, 2000) // last argument indicates port
@@ -46,7 +46,7 @@ func (s *SimulationService) Setup(dir string, hosts []string) (
 // by the server. Here we call the 'Node'-method of the
 // SimulationBFTree structure which will load the roster- and the
 // tree-structure to speed up the first round.
-func (s *SimulationService) Node(config *onet.SimulationConfig) error {
+func (s *LeavesHTMLSimulation) Node(config *onet.SimulationConfig) error {
 	index, _ := config.Roster.Search(config.Server.ServerIdentity.ID)
 	if index < 0 {
 		log.Fatal("Didn't find this node in roster")
@@ -55,26 +55,30 @@ func (s *SimulationService) Node(config *onet.SimulationConfig) error {
 	return s.SimulationBFTree.Node(config)
 }
 
-func (s *SimulationService) Run(config *onet.SimulationConfig) error {
+func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
 	size := config.Tree.Size()
-	log.Lvl1("Tree is:", config.Tree.Dump())
-	log.Lvl3("Size is:", size)
-	c := decenarch.NewClient()
-	round := monitor.NewTimeMeasure("round")
+	log.Lvl3("Size is:", size, "rounds:", s.Rounds)
+	for round := 0; round < s.Rounds; round++ {
+		log.Lvl1("Starting round", round)
+		round := monitor.NewTimeMeasure("round")
 
-	// setup
-	_, err := c.Setup(config.Roster)
-	if err != nil {
-		log.Error(err)
+		c := decenarch.NewClient()
+
+		// setup
+		_, err := c.Setup(config.Roster)
+		if err != nil {
+			log.Error(err)
+		}
+
+		// save
+		log.Print("Webpage", s.Webpage)
+		_, err = c.Save(config.Roster, s.Webpage)
+		if err != nil {
+			log.Error(err)
+		}
+
+		round.Record()
 	}
-
-	// save
-	_, err = c.Save(config.Roster, s.Webpage)
-	if err != nil {
-		log.Error(err)
-	}
-
-	round.Record()
 
 	return nil
 }
