@@ -6,6 +6,7 @@ import (
 	"gopkg.in/dedis/onet.v2/log"
 
 	decenarch "github.com/dedis/student_18_decenar"
+	"github.com/dedis/student_18_decenar/service"
 	"gopkg.in/dedis/onet.v2/simul/monitor"
 )
 
@@ -57,27 +58,60 @@ func (s *LeavesHTMLSimulation) Node(config *onet.SimulationConfig) error {
 
 func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
 	size := config.Tree.Size()
-	log.Lvl3("Size is:", size, "rounds:", s.Rounds)
+	log.Lvl2("Size is:", size, "rounds:", s.Rounds)
+
+	// create new client
+	c := decenarch.NewClient()
+
+	// run setup service
+	_, err := c.Setup(config.Roster)
+	if err != nil {
+		log.Error(err)
+	}
+
+	// get appropiate service
+	service := config.GetService("Decenarch").(*service.Service)
 	for round := 0; round < s.Rounds; round++ {
 		log.Lvl1("Starting round", round)
-		round := monitor.NewTimeMeasure("round")
-
-		c := decenarch.NewClient()
-
-		// setup
-		_, err := c.Setup(config.Roster)
-		if err != nil {
-			log.Error(err)
-		}
+		completeRound := monitor.NewTimeMeasure("Complete round")
 
 		// save
 		log.Print("Webpage", s.Webpage)
-		_, err = c.Save(config.Roster, s.Webpage)
-		if err != nil {
-			log.Error(err)
-		}
+		go service.SaveWebpage(&decenarch.SaveRequest{Url: s.Webpage, Roster: config.Roster})
 
-		round.Record()
+		// monitor consensus on structured data
+		<-service.StructuredConsensusChanStart
+		consensusStructuredRound := monitor.NewTimeMeasure("Consensus structured")
+		<-service.StructuredConsensusChanStop
+		consensusStructuredRound.Record()
+
+		// monitor decryption
+		<-service.DecryptChanStart
+		decryptRound := monitor.NewTimeMeasure("Decrypt")
+		<-service.DecryptChanStop
+		decryptRound.Record()
+
+		// monitor reconstruction
+		<-service.ReconstructChanStart
+		reconstructRound := monitor.NewTimeMeasure("Reconstruct")
+		<-service.ReconstructChanStop
+		reconstructRound.Record()
+
+		// monitor signature
+		<-service.SignChanStart
+		signatureRecord := monitor.NewTimeMeasure("Sign")
+		<-service.SignChanStop
+		signatureRecord.Record()
+
+		// monitor skipadd
+		<-service.SkipAddStart
+		skipRecord := monitor.NewTimeMeasure("Skip")
+		<-service.SkipAddStop
+		skipRecord.Record()
+
+		// record complete round
+		<-service.SaveStop
+		completeRound.Record()
 	}
 
 	return nil

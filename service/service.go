@@ -35,14 +35,14 @@ import (
 )
 
 // Used for tests
-var templateID onet.ServiceID
+var serviceID onet.ServiceID
 
 // timeout for protocol termination.
 const timeout = 24 * time.Hour
 
 func init() {
 	var err error
-	templateID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
+	serviceID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
 	log.ErrFatal(err)
 	network.RegisterMessages(&Storage{}, SetupPropagation{})
 }
@@ -59,6 +59,18 @@ type Service struct {
 	Leaves        []string   // unique leaves of the HTML tree
 
 	Storage *Storage
+
+	StructuredConsensusChanStart chan bool
+	StructuredConsensusChanStop  chan bool
+	DecryptChanStart             chan bool
+	DecryptChanStop              chan bool
+	ReconstructChanStart         chan bool
+	ReconstructChanStop          chan bool
+	SignChanStart                chan bool
+	SignChanStop                 chan bool
+	SkipAddStart                 chan bool
+	SkipAddStop                  chan bool
+	SaveStop                     chan bool
 }
 
 // storageID reflects the data we're storing - we could store more
@@ -155,6 +167,7 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 // Save is the function called by the service when a client want to save a website in the
 // archive.
 func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
+	// simulation chan is used to communicate en of the protocols to the simulation service
 	stattimes := make([]string, 0)
 	log.Lvl3("Decenarch Service new SaveWebpage")
 
@@ -174,6 +187,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	structuredConsensusProtocol.Url = req.Url
 
 	// start the protocol
+	s.StructuredConsensusChanStart <- true
 	err = structuredConsensusProtocol.Start()
 	if err != nil {
 		return nil, err
@@ -183,6 +197,10 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	var mainTimestamp string
 	select {
 	case <-structuredConsensusProtocol.Finished:
+		// communicate end of the structured consensus protocol to the
+		// simulation service
+		s.StructuredConsensusChanStop <- true
+
 		// only if the consensus protocol terminates succesfully it
 		// makes sense to store the webpage, otherwise an error should
 		// be returned
@@ -201,22 +219,36 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		s.save()
 
 		// run decryt protocol
+		s.DecryptChanStart <- true
 		partials, err := s.decrypt(tree, structuredConsensusProtocol.EncryptedCBFSet)
 		if err != nil {
 			return nil, err
 		}
+		// communicate end of the decryption protocol to the simulation
+		// service
+		s.DecryptChanStop <- true
 
 		// reconstruct html page
+		s.ReconstructChanStart <- true
 		msgToSign, err := s.reconstruct(len(req.Roster.List), partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
 		if err != nil {
 			return nil, err
 		}
 
+		// communicate end of the reconstruction to the simulation
+		// service
+		s.ReconstructChanStop <- true
+
 		// sign the consensus website found
+		s.SignChanStart <- true
 		sig, sigErr := s.sign(tree, msgToSign, true)
 		if sigErr != nil {
 			return nil, sigErr
 		}
+
+		// communicate end of signing protocol to the simulation
+		// service
+		s.SignChanStop <- true
 
 		// create storing structure
 		mainTimestamp = time.Now().Format("2006/01/02 15:04")
@@ -303,6 +335,8 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 	// add additional data to the slice of storing structures
 	webadds = append(webadds, webmain)
+
+	s.SkipAddStart <- true
 	// send data to the blockchain
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := skip.NewSkipClient(int(s.threshold()))
@@ -310,12 +344,16 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	if err != nil {
 		return nil, err
 	}
+	s.SkipAddStop <- true
 
 	// store latest block ID for retrieval
 	s.Storage.Lock()
 	s.Storage.LatestID = resp.Latest.Hash
 	s.Storage.Unlock()
 	s.save()
+
+	// end of save
+	s.SaveStop <- true
 
 	return &decenarch.SaveResponse{Times: stattimes}, nil
 }
@@ -715,6 +753,17 @@ func newService(c *onet.Context) (onet.Service, error) {
 	s := &Service{
 		ServiceProcessor: onet.NewServiceProcessor(c),
 		Storage:          &Storage{},
+		StructuredConsensusChanStart: make(chan bool),
+		StructuredConsensusChanStop:  make(chan bool),
+		DecryptChanStart:             make(chan bool),
+		DecryptChanStop:              make(chan bool),
+		ReconstructChanStart:         make(chan bool),
+		ReconstructChanStop:          make(chan bool),
+		SignChanStart:                make(chan bool),
+		SignChanStop:                 make(chan bool),
+		SkipAddStart:                 make(chan bool),
+		SkipAddStop:                  make(chan bool),
+		SaveStop:                     make(chan bool),
 	}
 	if err := s.RegisterHandlers(s.Setup, s.SaveWebpage, s.Retrieve); err != nil {
 		log.Error(err, "Couldn't register messages")
