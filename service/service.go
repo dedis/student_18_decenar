@@ -235,7 +235,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	log.Lvl4("Create stored request")
 
 	//  run consensus protocol for all additional ressources
-	var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
+	//var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
 	bytePage, err := base64.StdEncoding.DecodeString(webmain.Page)
 	if err != nil {
 		return nil, err
@@ -243,51 +243,66 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	addsLinks := ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
 
 	// iterate over additional links and retrieve the content
-	for _, al := range addsLinks {
-		log.Lvl4("Get additional", al)
-		api, err := s.CreateProtocol(protocol.NameConsensusUnstructured, tree)
-		if err != nil {
-			return nil, err
-		}
-		unstructuredConsensusProtocol := api.(*protocol.ConsensusUnstructuredState)
-		unstructuredConsensusProtocol.Url = al
-		unstructuredConsensusProtocol.Threshold = uint32(s.threshold())
-		err = api.Start()
-		if err != nil {
-			return nil, err
-		}
-		select {
-		case <-unstructuredConsensusProtocol.Finished:
-			ru := unstructuredConsensusProtocol.Url
-			ct := unstructuredConsensusProtocol.ContentType
-			mts := unstructuredConsensusProtocol.MsgToSign
-
-			// sign the consensus additional data
-			as, err := s.sign(tree, mts, false)
+	var wg sync.WaitGroup
+	webadds := make([]decenarch.Webstore, len(addsLinks))
+	webmain.AddsUrl = make([]string, len(addsLinks))
+	for i, al := range addsLinks {
+		wg.Add(1)
+		go func(i int, al string) {
+			log.Lvl4("Get additional", al)
+			api, err := s.CreateProtocol(protocol.NameConsensusUnstructured, tree)
 			if err != nil {
-				return nil, err
+				// If there is an error for additional data we
+				// do not return an error, we simply inform the
+				// user and handle the next additional data
+				log.Infof("Error during unstructured consensus protocol for additional link %v: %v\n", al, err)
+				wg.Done()
+				return
 			}
-
-			// create storing structure
-			aweb := decenarch.Webstore{
-				Url:         ru,
-				ContentType: ct,
-				Sig:         as,
-				Page:        base64.StdEncoding.EncodeToString(mts),
-				AddsUrl:     make([]string, 0),
-				Timestamp:   mainTimestamp,
+			unstructuredConsensusProtocol := api.(*protocol.ConsensusUnstructuredState)
+			unstructuredConsensusProtocol.Url = al
+			unstructuredConsensusProtocol.Threshold = uint32(s.threshold())
+			err = api.Start()
+			if err != nil {
+				log.Infof("Error during unstructured consensus protocol for additional link %v: %v\n", al, err)
+				wg.Done()
+				return
 			}
-			webadds = append(webadds, aweb)
-			webmain.AddsUrl = append(webmain.AddsUrl, al)
-		case <-time.After(timeout):
-			return nil, errors.New("unstructuredConsensusProtocol timeout")
+			select {
+			case <-unstructuredConsensusProtocol.Finished:
+				ru := unstructuredConsensusProtocol.Url
+				ct := unstructuredConsensusProtocol.ContentType
+				mts := unstructuredConsensusProtocol.MsgToSign
 
-		}
+				// sign the consensus additional data
+				as, err := s.sign(tree, mts, false)
+				if err != nil {
+					log.Error(err)
+				}
+
+				// create storing structure
+				aweb := decenarch.Webstore{
+					Url:         ru,
+					ContentType: ct,
+					Sig:         as,
+					Page:        base64.StdEncoding.EncodeToString(mts),
+					AddsUrl:     make([]string, 0),
+					Timestamp:   mainTimestamp,
+				}
+				webadds[i] = aweb
+				webmain.AddsUrl[i] = al
+			case <-time.After(timeout):
+				log.Infof("Timeout for unstructured consensus protocol for additional link %v: %v\n", al, err)
+			}
+			// done with this additional link
+			wg.Done()
+		}(i, al)
 	}
+	// wait for all the additional to be retrieved and stored
+	wg.Wait()
 
 	// add additional data to the slice of storing structures
 	webadds = append(webadds, webmain)
-
 	// send data to the blockchain
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := skip.NewSkipClient(int(s.threshold()))
@@ -479,7 +494,7 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 		req.Roster.Publics(),
 		bPage,
 		resp.MainPage.Sig.Signature,
-		cosi.CompletePolicy{})
+		cosi.NewThresholdPolicy(int(s.threshold())))
 	if vsigErr != nil {
 		log.Lvl1(vsigErr)
 		return nil, vsigErr

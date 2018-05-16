@@ -21,7 +21,6 @@ type CompleteProof struct {
 	PublicKey                kyber.Point
 	AggregationProof         *AggregationProof
 	CipherVectorProof        *CipherVectorProof
-	EncryptedCBFSet          *CipherVector
 	EncryptedCBFSetSignature []byte
 }
 
@@ -38,7 +37,7 @@ func (p *CompleteProofs) VerifyCompleteProofs() bool {
 func (p *CompleteProof) VerifyCompleteProof() bool {
 	// for both leaf and non leaf node we verify the signature of the
 	// ciphervector, i.e. the encrypted CBF set. Note that if the node creating this proof spoof someone's else identity, by using it's public key, this proof will not work and therefore it will be rejected.
-	bytesEncryptedSet, _ := p.EncryptedCBFSet.ToBytes()
+	bytesEncryptedSet, _ := p.AggregationProof.Aggregation.ToBytes()
 	hashed := decenarch.Suite.Hash().Sum(bytesEncryptedSet)
 	vErr := schnorr.Verify(decenarch.Suite, p.PublicKey, hashed, p.EncryptedCBFSetSignature)
 	if vErr != nil {

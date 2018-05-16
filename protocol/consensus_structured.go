@@ -70,6 +70,9 @@ func NewConsensusStructuredProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInst
 			return nil, errors.New("couldn't register handler: " + err.Error())
 		}
 	}
+
+	// we need big messages
+	network.MaxPacketSize = network.Size(100 * 1024 * 1024)
 	return t, nil
 }
 
@@ -306,12 +309,11 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 		p.CompleteProofs[pubKeyString].AggregationProof = lib.CreateAggregationiProof(childrenContributions, p.EncryptedCBFSet)
 	}
 
-	// add encrypted CBF set and its signature to the proof material of
-	// this conode. The signature should be added here because we have to
-	// take into account the addition for the non leaf nodes. If the node
-	// isn't a leaf, we skip the addition part, so no problem in signing
-	// the encrypted Bloom filter here
-	p.CompleteProofs[pubKeyString].EncryptedCBFSet = p.EncryptedCBFSet
+	// add signature of encrypted CBF set the proof material of this
+	// conode. The signature should be added here because we have to take
+	// into account the addition for the non leaf nodes. If the node isn't
+	// a leaf, we skip the addition part, so no problem in signing the
+	// encrypted Bloom filter here
 	sig, err := p.signEncryptedCBFSet()
 	if err != nil {
 		return err
