@@ -1,15 +1,16 @@
 Servers = 10
 Simulation = "LeavesHTML"
 BF = 2
+Hosts = 7
 Rounds = 10
 RunWait = "24h"
 Suite = "Ed25519"
 
-Hosts, Webpage
-#7, "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/64.html"
-#7, "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/256.html"
-7, "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/1024.html"
-7, "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/4096.html"
-7, "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/8192.html"
-7, "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/16384.html"
-7, "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/32768.html"
+Webpage
+"https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/64.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/128.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/256.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/512.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/1024.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/2048.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/4096.html"

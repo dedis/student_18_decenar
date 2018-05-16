@@ -338,13 +338,14 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 	s.SkipAddStart <- true
 	// send data to the blockchain
-	log.Lvl4("sending", webadds, "to skipchain")
+	log.LLvl4("sending", webadds, "to skipchain")
 	skipclient := skip.NewSkipClient(int(s.threshold()))
 	resp, err := skipclient.SkipAddData(s.genesisID(), req.Roster, webadds)
 	if err != nil {
 		return nil, err
 	}
 	s.SkipAddStop <- true
+	log.Print("Si ferma dopo")
 
 	// store latest block ID for retrieval
 	s.Storage.Lock()
