@@ -336,22 +336,21 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	// add additional data to the slice of storing structures
 	webadds = append(webadds, webmain)
 
-	s.SkipAddStart <- true
-	// send data to the blockchain
-	log.LLvl4("sending", webadds, "to skipchain")
-	skipclient := skip.NewSkipClient(int(s.threshold()))
-	resp, err := skipclient.SkipAddData(s.genesisID(), req.Roster, webadds)
-	if err != nil {
-		return nil, err
-	}
-	s.SkipAddStop <- true
-	log.Print("Si ferma dopo")
+	//s.SkipAddStart <- true
+	//	// send data to the blockchain
+	//	log.LLvl4("sending", webadds, "to skipchain")
+	//	skipclient := skip.NewSkipClient(int(s.threshold()))
+	//	resp, err := skipclient.SkipAddData(s.genesisID(), req.Roster, webadds)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//s.SkipAddStop <- true
 
-	// store latest block ID for retrieval
-	s.Storage.Lock()
-	s.Storage.LatestID = resp.Latest.Hash
-	s.Storage.Unlock()
-	s.save()
+	//	// store latest block ID for retrieval
+	//	s.Storage.Lock()
+	//	s.Storage.LatestID = resp.Latest.Hash
+	//	s.Storage.Unlock()
+	//	s.save()
 
 	// end of save
 	s.SaveStop <- true
@@ -476,7 +475,7 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, structured bool) (*ftcosi
 	// Timeout is not a global timeout for the protocol, but a timeout used
 	// for waiting for responses for sub protocols.
 	//p.Timeout = time.Second * 5
-	p.Timeout = time.Minute * 5
+	p.Timeout = time.Minute * 60
 
 	// add data for verification depending on what we want to sign
 	if structured {

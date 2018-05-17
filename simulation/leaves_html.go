@@ -106,16 +106,16 @@ func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
 		signatureRecord.Record()
 
 		// monitor skipadd
-		<-service.SkipAddStart
-		skipRecord := monitor.NewTimeMeasure("Skip")
-		<-service.SkipAddStop
-		skipRecord.Record()
+		//		<-service.SkipAddStart
+		//		skipRecord := monitor.NewTimeMeasure("Skip")
+		//		<-service.SkipAddStop
+		//		skipRecord.Record()
 
 		// record complete round
 		<-service.SaveStop
 		completeRound.Record()
 
-		time.Sleep(2 * time.Minute)
+		time.Sleep(1 * time.Minute)
 	}
 
 	return nil
