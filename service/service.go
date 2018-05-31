@@ -70,6 +70,8 @@ type Service struct {
 	ReconstructChanStop          chan bool
 	SignChanStart                chan bool
 	SignChanStop                 chan bool
+	AdditionalDataStart          chan bool
+	AdditionalDataStop           chan bool
 	SkipAddStart                 chan bool
 	SkipAddStop                  chan bool
 	SaveStop                     chan bool
@@ -289,6 +291,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	var wg sync.WaitGroup
 	webadds := make([]decenarch.Webstore, len(addsLinks))
 	webmain.AddsUrl = make([]string, len(addsLinks))
+	s.AdditionalDataStart <- true
 	for i, al := range addsLinks {
 		wg.Add(1)
 		go func(i int, al string) {
@@ -347,6 +350,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 	// add additional data to the slice of storing structures
 	webadds = append(webadds, webmain)
+	s.AdditionalDataStop <- true
 
 	//s.SkipAddStart <- true
 	//	// send data to the blockchain

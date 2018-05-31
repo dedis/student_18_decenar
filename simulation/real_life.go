@@ -13,10 +13,10 @@ import (
 )
 
 func init() {
-	onet.SimulationRegister("LeavesHTML", NewLeavesHTMLSimulation)
+	onet.SimulationRegister("RealLife", NewRealLifeSimulation)
 }
 
-type LeavesHTMLSimulation struct {
+type RealLifeSimulation struct {
 	onet.SimulationBFTree
 
 	Webpage string
@@ -24,7 +24,7 @@ type LeavesHTMLSimulation struct {
 
 // NewLeavesHTMLSimulation returns the new simulation, where all fields are
 // initialised using the config-file
-func NewLeavesHTMLSimulation(config string) (onet.Simulation, error) {
+func NewRealLifeSimulation(config string) (onet.Simulation, error) {
 	es := &LeavesHTMLSimulation{}
 	_, err := toml.Decode(config, es)
 	if err != nil {
@@ -34,7 +34,7 @@ func NewLeavesHTMLSimulation(config string) (onet.Simulation, error) {
 }
 
 // Setup creates the tree used for that simulation
-func (s *LeavesHTMLSimulation) Setup(dir string, hosts []string) (
+func (s *RealLifeSimulation) Setup(dir string, hosts []string) (
 	*onet.SimulationConfig, error) {
 	sc := &onet.SimulationConfig{}
 	s.CreateRoster(sc, hosts, 2000) // last argument indicates port
@@ -49,7 +49,7 @@ func (s *LeavesHTMLSimulation) Setup(dir string, hosts []string) (
 // by the server. Here we call the 'Node'-method of the
 // SimulationBFTree structure which will load the roster- and the
 // tree-structure to speed up the first round.
-func (s *LeavesHTMLSimulation) Node(config *onet.SimulationConfig) error {
+func (s *RealLifeSimulation) Node(config *onet.SimulationConfig) error {
 	index, _ := config.Roster.Search(config.Server.ServerIdentity.ID)
 	if index < 0 {
 		log.Fatal("Didn't find this node in roster")
@@ -58,7 +58,7 @@ func (s *LeavesHTMLSimulation) Node(config *onet.SimulationConfig) error {
 	return s.SimulationBFTree.Node(config)
 }
 
-func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
+func (s *RealLifeSimulation) Run(config *onet.SimulationConfig) error {
 	size := config.Tree.Size()
 	log.Lvl2("Size is:", size, "rounds:", s.Rounds)
 
@@ -107,7 +107,9 @@ func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
 
 		// we don't have additional data here
 		<-service.AdditionalDataStart
+		additionalDataRound := monitor.NewTimeMeasure("additional_data")
 		<-service.AdditionalDataStop
+		additionalDataRound.Record()
 
 		// record complete round
 		<-service.SaveStop

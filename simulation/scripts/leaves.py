@@ -29,11 +29,11 @@ data = get_data(sys.argv[1])
 x_values = [64, 128, 256, 512, 1024, 2048]
 
 # data
-consensus = data.loc[:, "Consensus structured_wall_avg"]
-decrypt = data.loc[:, "Decrypt_wall_avg"]
-reconstruct = data.loc[:, "Reconstruct_wall_avg"]
-sign = data.loc[:, "Sign_wall_avg"]
-complete = data.loc[:, "Complete round_wall_avg"]
+consensus = data.loc[:, "consensus_structured_wall_avg"]
+decrypt = data.loc[:, "decrypt_wall_avg"]
+reconstruct = data.loc[:, "reconstruct_wall_avg"]
+sign = data.loc[:, "sign_wall_avg"]
+complete = data.loc[:, "complete round_wall_avg"]
 
 # interpolation
 
