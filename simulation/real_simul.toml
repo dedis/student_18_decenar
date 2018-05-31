@@ -1,0 +1,18 @@
+Servers = 7
+Simulation = "LeavesHTML"
+Hosts = 7
+Rounds = 10
+RunWait = "24h"
+Suite = "Ed25519"
+
+Webpage
+"https://twitter.com/ignaziocassis"
+"https://blog.golang.org/"
+"http://www.20min.ch/ro/"
+"http://www.20min.ch/ro/news/monde/story/L-UE-repliquera-de-fa-on--unie--aux-sanctions-US-27701771"
+"https://www.lemonde.fr/europe/article/2018/05/31/mariano-rajoy-le-resilient-est-il-sur-le-point-de-tomber_5307264_3214.html"
+"https://www.internazionale.it/bloc-notes/2018/05/31/governo-italiano-fantasma-stampa-straniera"
+"https://www.reddit.com/r/crypto"
+"http://www.bbc.com/news/world-europe-44313905"
+"https://www.tdg.ch/monde/trois-briancon-pouvoir-rentrer/story/11131502"
+"https://www.cnet.com/news/russian-politicians-call-on-mark-zuckerberg-to-testify-on-privacy/"
