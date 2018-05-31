@@ -183,6 +183,8 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 	return nil
 }
 
+// HandleCompleteProofs is responsible for storing the complete proofs received
+// from root, which is responsible for aggregating and sending them
 func (p *ConsensusStructuredState) HandleCompleteProofs(cp StructCompleteProofsAnnounce) error {
 	defer p.Done()
 
@@ -270,44 +272,65 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 	p.CountingBloomFilter = lib.NewFilledBloomFilter(param, locTree)
 	log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 
-	// initialize local proof
+	// initialize local proof with useful fields
 	p.CompleteProofs = make(lib.CompleteProofs)
 	p.CompleteProofs[pubKeyString] = &lib.CompleteProof{
 		Roster:      p.Roster(),
 		TreeMarshal: p.Tree().MakeTreeMarshal(),
 		PublicKey:   p.Public(),
+		TreeNodeID:  p.TreeNode().ID,
 	}
 
 	// encrypt set of the filter using the collective DKG key and prove
 	// that the set contains only zeros and ones
-	p.EncryptedCBFSet, p.CompleteProofs[pubKeyString].CipherVectorProof = lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+	localBloomEncrypted, proof := lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+	p.CompleteProofs[pubKeyString].CipherVectorProof = proof
+	p.CompleteProofs[pubKeyString].EncryptedBloomFilter, _ = localBloomEncrypted.ToBytes()
 
 	// aggregate children contributions after checking the signature
-	childrenContributions := make(map[string]*lib.CipherVector)
+	childrenContributions := make(map[string][]byte)
+	childrenContributions[pubKeyString], _ = localBloomEncrypted.ToBytes()
+	p.EncryptedCBFSet = localBloomEncrypted
 	if !p.IsLeaf() {
 		for _, r := range reply {
+			// convert child contribution to bytes
+			bytesEncryptedBloomFilter, _ := r.EncryptedCBFSet.ToBytes()
 			// aggregate children proofs with local proof
 			for conode, proof := range r.CompleteProofs {
+				// set the child encrypted CBF for the
+				// ciphervector proof as the received encrypted
+				// bloom filter, since we use a tree of height
+				// one. Note that this should be modified if we want to use a tree of height > 1
+				proof.EncryptedBloomFilter = bytesEncryptedBloomFilter
+
+				// store the child proof
 				p.CompleteProofs[conode] = proof
 			}
 
-			// aggregate encrypted CBF set after proof verification
+			// aggregate encrypted CBF set after content proof and
+			// signature verification
 			bytesEncryptedSet, _ := r.EncryptedCBFSet.ToBytes()
 			hashed := p.Suite().(kyber.HashFactory).Hash().Sum(bytesEncryptedSet)
-			vErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, hashed, r.CompleteProofs[r.TreeNode.ServerIdentity.Public.String()].EncryptedCBFSetSignature)
-			if vErr == nil {
+			conodeKey := r.TreeNode.ServerIdentity.Public.String()
+			vErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, hashed, r.CompleteProofs[conodeKey].EncryptedCBFSetSignature)
+			if vErr == nil && p.CompleteProofs[conodeKey].CipherVectorProof.VerifyCipherVectorProof(r.EncryptedCBFSet) {
 				log.Lvl4("Valid encrypted CBF set signature for node", r.ServerIdentity.Address)
-				childrenContributions[r.TreeNode.ServerIdentity.Public.String()] = r.EncryptedCBFSet
+				childrenContributions[r.TreeNode.ServerIdentity.Public.String()], _ = r.EncryptedCBFSet.ToBytes()
 				p.EncryptedCBFSet.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
 			} else {
-				log.Lvl1("Invalid signature for node", r.ServerIdentity.Address)
+				log.Lvl1("Invalid signature or content proof for node", r.ServerIdentity.Address)
 				p.Errs = append(p.Errs, vErr)
 			}
 		}
-
-		// add local aggregation proof
-		p.CompleteProofs[pubKeyString].AggregationProof = lib.CreateAggregationiProof(childrenContributions, p.EncryptedCBFSet)
 	}
+
+	// store sum of all contributions plus the local contribution of the conode
+	bytesEncrypted, length := p.EncryptedCBFSet.ToBytes()
+
+	// add local aggregation proof
+	// we add this proof also for the leaves because we use it to
+	// communicate to the signing protocol the encrypted CBF set
+	p.CompleteProofs[pubKeyString].AggregationProof = lib.CreateAggregationiProof(childrenContributions, bytesEncrypted, length)
 
 	// add signature of encrypted CBF set the proof material of this
 	// conode. The signature should be added here because we have to take

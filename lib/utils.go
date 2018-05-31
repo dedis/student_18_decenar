@@ -8,6 +8,7 @@ import (
 	"golang.org/x/net/html"
 	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/kyber.v2"
+	"gopkg.in/dedis/kyber.v2/share"
 	dkg "gopkg.in/dedis/kyber.v2/share/dkg/rabin"
 )
 
@@ -146,4 +147,28 @@ func ConcatenateErrors(errs []error) error {
 	}
 
 	return errors.New(strings.Join(errsString, "\n"))
+}
+
+func ReconstructVectorFromPartials(nodes, threshold int, partials map[int][]kyber.Point) ([]int64, error) {
+	points := make([]kyber.Point, 0)
+	n := nodes
+	for i := 0; i < len(partials[0]); i++ {
+		shares := make([]*share.PubShare, n)
+		for j, partial := range partials {
+			shares[j] = &share.PubShare{I: j, V: partial[i]}
+		}
+		message, err := share.RecoverCommit(decenarch.Suite, shares, threshold, n)
+		if err != nil {
+			return nil, err
+		}
+		points = append(points, message)
+	}
+
+	// reconstruct the points using by computing the dlog
+	reconstructed := make([]int64, 0)
+	for _, point := range points {
+		reconstructed = append(reconstructed, GetPointToInt(point))
+	}
+
+	return reconstructed, nil
 }

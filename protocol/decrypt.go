@@ -19,14 +19,15 @@ const NameDecrypt = "decrypt"
 // Decrypt is the core structure of the protocol.
 type Decrypt struct {
 	*onet.TreeNodeInstance
-	Threshold int32 // How many replies are needed to re-create the secret
-	Failures  int   // How many failures occured so far
+	Threshold int32 // how many replies are needed to re-create the secret
+	Failures  int   // how many failures occured so far
 
-	Secret          *lib.SharedSecret // Secret is the private key share from the DKG.
-	EncryptedCBFSet *lib.CipherVector // Election to be decrypted.
+	Secret          *lib.SharedSecret // secret is the private key share from the DKG.
+	EncryptedCBFSet *lib.CipherVector // election to be decrypted.
 
-	Partials map[int][]kyber.Point // Parials to return
-	Finished chan bool             // Flag to signal protocol termination.
+	Partials map[int][]kyber.Point // parials to return
+	Finished chan bool             // flag to signal protocol termination.
+	Received chan bool             // flag to signal that the conode received the encrypted filter
 	doneOnce sync.Once
 	timeout  *time.Timer
 	mutex    sync.Mutex
@@ -41,7 +42,8 @@ func init() {
 func NewDecrypt(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 	d := &Decrypt{
 		TreeNodeInstance: n,
-		Finished:         make(chan bool, 1),
+		Finished:         make(chan bool),
+		Received:         make(chan bool),
 		Partials:         make(map[int][]kyber.Point),
 	}
 
@@ -79,8 +81,14 @@ func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
 	log.Lvl3(d.Name() + ": sending partials to root")
 	defer d.Done()
 
+	// store encrypted CBF set for later verification
+	d.EncryptedCBFSet = prompt.EncryptedCBFSet
+
 	// partially decrypt
 	partials := d.getPartials(prompt.EncryptedCBFSet)
+
+	// we can store encrypted filter
+	d.Received <- true
 
 	// send partials to root
 	return d.SendTo(d.Root(), &SendPartial{partials})
@@ -128,8 +136,24 @@ func (d *Decrypt) finish(result bool) {
 // getPartials
 func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
 	partials := make([]kyber.Point, len(*cipher))
-	for i, c := range *cipher {
-		partials[i] = lib.DecryptPoint(d.Secret.V, lib.CipherText{K: c.K, C: c.C})
+	var wg sync.WaitGroup
+	if lib.PARALLELIZE {
+		for i := 0; i < len(*cipher); i = i + lib.VPARALLELIZE {
+			wg.Add(1)
+			go func(i int) {
+				for j := 0; j < lib.VPARALLELIZE && (j+i < len(*cipher)); j++ {
+					c := &(*cipher)[i+j]
+					partials[i+j] = lib.DecryptPoint(d.Secret.V, lib.CipherText{K: c.K, C: c.C})
+				}
+				defer wg.Done()
+			}(i)
+
+		}
+		wg.Wait()
+	} else {
+		for i, c := range *cipher {
+			partials[i] = lib.DecryptPoint(d.Secret.V, lib.CipherText{K: c.K, C: c.C})
+		}
 	}
 
 	return partials
