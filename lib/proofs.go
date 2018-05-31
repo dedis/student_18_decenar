@@ -1,14 +1,13 @@
 package lib
 
 import (
-	"reflect"
+	"sync"
 
 	decenarch "github.com/dedis/student_18_decenar"
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/proof/dleq"
 	"gopkg.in/dedis/kyber.v2/sign/schnorr"
 	"gopkg.in/dedis/onet.v2"
-	"gopkg.in/dedis/onet.v2/log"
 )
 
 type CompleteProofs map[string]*CompleteProof
@@ -22,10 +21,16 @@ type CompleteProof struct {
 	AggregationProof         *AggregationProof
 	CipherVectorProof        *CipherVectorProof
 	EncryptedCBFSetSignature []byte
+	TreeNodeID               onet.TreeNodeID
+	EncryptedBloomFilter     []byte
 }
 
-func (p *CompleteProofs) VerifyCompleteProofs() bool {
-	for _, v := range *p {
+func (p *CompleteProofs) VerifyCompleteProofs(conodeKey string) bool {
+	for key, v := range *p {
+		// do not verify my own proofs
+		if key == conodeKey {
+			continue
+		}
 		if !v.VerifyCompleteProof() {
 			return false
 		}
@@ -37,7 +42,8 @@ func (p *CompleteProofs) VerifyCompleteProofs() bool {
 func (p *CompleteProof) VerifyCompleteProof() bool {
 	// for both leaf and non leaf node we verify the signature of the
 	// ciphervector, i.e. the encrypted CBF set. Note that if the node creating this proof spoof someone's else identity, by using it's public key, this proof will not work and therefore it will be rejected.
-	bytesEncryptedSet, _ := p.AggregationProof.Aggregation.ToBytes()
+	//bytesEncryptedSet, _ := p.AggregationProof.Aggregation.ToBytes()
+	bytesEncryptedSet := p.AggregationProof.Aggregation
 	hashed := decenarch.Suite.Hash().Sum(bytesEncryptedSet)
 	vErr := schnorr.Verify(decenarch.Suite, p.PublicKey, hashed, p.EncryptedCBFSetSignature)
 	if vErr != nil {
@@ -47,69 +53,106 @@ func (p *CompleteProof) VerifyCompleteProof() bool {
 	// verify if the node is a leaf
 	tree, err := p.TreeMarshal.MakeTree(p.Roster)
 	if err != nil {
-		log.Lvl1("error during MakeTree(), proof is rejected")
 		return false
 	}
 
 	// verify that the node is really who he claims to be
-	if !tree.Root.ServerIdentity.Public.Equal(p.PublicKey) {
+	treeNode := tree.Search(p.TreeNodeID)
+	if !treeNode.ServerIdentity.Public.Equal(p.PublicKey) {
 		return false
 	}
 
-	// the node is a leaf?
-	isLeaf := len(tree.Root.Children) == 0
+	// the node is a leaf
+	isLeaf := len(treeNode.Children) == 0
+
+	// we use the aggregation length since it is the same as the Bloom filter length
+	filter := make(CipherVector, p.AggregationProof.Length)
+	filter.FromBytes(p.EncryptedBloomFilter, p.AggregationProof.Length)
 
 	// if the node responsible of this complete proof is a leaf, we only
 	// have to verify the signature of the ciphervector and the proof that
 	// the ciphervector containts only zeros and ones, since a leaf node is
 	// not responsible of aggregating ciphervectors of other conodes
 	if isLeaf {
-		return p.CipherVectorProof.VerifyCipherVectorProof()
+		return p.CipherVectorProof.VerifyCipherVectorProof(&filter)
 	}
 
 	// if the node isn't a leaf, we verify all the proofs
-	return p.AggregationProof.VerifyAggregationProof() && p.CipherVectorProof.VerifyCipherVectorProof()
+	return p.AggregationProof.VerifyAggregationProof() && p.CipherVectorProof.VerifyCipherVectorProof(&filter)
 }
 
 type AggregationProof struct {
-	Contributions map[string]*CipherVector
-	Aggregation   *CipherVector
+	Contributions map[string][]byte
+	Aggregation   []byte
+	Length        int
 }
 
-func CreateAggregationiProof(c map[string]*CipherVector, a *CipherVector) *AggregationProof {
-	return &AggregationProof{Contributions: c, Aggregation: a}
+func CreateAggregationiProof(c map[string][]byte, a []byte, length int) *AggregationProof {
+	return &AggregationProof{Contributions: c, Aggregation: a, Length: length}
 }
 
 func (p *AggregationProof) VerifyAggregationProof() bool {
-	tmp := NewCipherVector(len(*p.Aggregation))
+	aggregation := make(CipherVector, p.Length)
+	aggregation.FromBytes(p.Aggregation, p.Length)
+
+	return p.VerifyAggregationProofWithAggregation(&aggregation)
+}
+
+func (p *AggregationProof) VerifyAggregationProofWithAggregation(a *CipherVector) bool {
+	tmp := NewCipherVector(len(*a))
+
+	// perform sum
 	for _, c := range p.Contributions {
-		tmp.Add(*tmp, *c)
+		cipher := make(CipherVector, p.Length)
+		cipher.FromBytes(c, p.Length)
+		tmp.Add(*tmp, cipher)
 	}
 
-	return reflect.DeepEqual(tmp, p.Aggregation)
+	// verify sum
+	for j, w := range *a {
+		if !w.C.Equal((*tmp)[j].C) {
+			return false
+		}
+		if !w.K.Equal((*tmp)[j].K) {
+			return false
+		}
+	}
+
+	return true
 }
 
 type CipherVectorProof []*CipherTextProof
 
 type CipherTextProof struct {
-	PublicKey  kyber.Point
-	CipherText *CipherText
-	Proof      *dleq.Proof
+	PublicKey kyber.Point
+	Proof     dleq.Proof
 }
 
 func CreateCipherTextProof(c *CipherText, publicKey kyber.Point, blinding kyber.Scalar) *CipherTextProof {
-	Proof, _, _, _ := dleq.NewDLEQProof(decenarch.Suite, decenarch.Suite.Point().Base(), publicKey, blinding)
-	return &CipherTextProof{PublicKey: publicKey, CipherText: c, Proof: Proof}
+	p, _, _, _ := dleq.NewDLEQProof(decenarch.Suite, decenarch.Suite.Point().Base(), publicKey, blinding)
+	return &CipherTextProof{PublicKey: publicKey, Proof: *p}
 }
 
-func (p *CipherVectorProof) VerifyCipherVectorProof() bool {
-	c := make(chan bool, len(*p))
-	for _, cipherTextProof := range *p {
-		go cipherTextProof.verify(c)
-	}
+func (p *CipherVectorProof) VerifyCipherVectorProof(cv *CipherVector) bool {
+	ch := make(chan bool, len(*p))
+	var wg sync.WaitGroup
 
-	// analyze outcomes
-	for outcome := range c {
+	// constants for proof verification
+	zeroPoint := ZeroToPoint()
+	onePoint := OneToPoint()
+	base := decenarch.Suite.Point().Base()
+
+	// verifiy all proofs
+	for i, cipherTextProof := range *p {
+		wg.Add(1)
+		go cipherTextProof.verify((*cv)[i], ch, &wg, zeroPoint, onePoint, base)
+	}
+	// wait for proof to be verified
+	wg.Wait()
+	close(ch)
+
+	// analyze outcomes of proofs verification
+	for outcome := range ch {
 		if !outcome {
 			return false
 		}
@@ -118,16 +161,21 @@ func (p *CipherVectorProof) VerifyCipherVectorProof() bool {
 	return true
 }
 
-func (p *CipherTextProof) verify(c chan bool) {
-	C := p.CipherText.C
-	K := p.CipherText.K
-	cMinusZero := decenarch.Suite.Point().Sub(C, ZeroToPoint())
-	cMinusOne := decenarch.Suite.Point().Sub(C, OneToPoint())
-	zeroProof := p.Proof.Verify(decenarch.Suite, decenarch.Suite.Point().Base(), p.PublicKey, K, cMinusZero)
-	oneProof := p.Proof.Verify(decenarch.Suite, decenarch.Suite.Point().Base(), p.PublicKey, K, cMinusOne)
+func (p *CipherTextProof) verify(c CipherText, ch chan bool, wg *sync.WaitGroup, zeroPoint, onePoint, base kyber.Point) {
+	C := c.C
+	K := c.K
+	cMinusZero := decenarch.Suite.Point().Sub(C, zeroPoint)
+	cMinusOne := decenarch.Suite.Point().Sub(C, onePoint)
+	zeroProof := p.Proof.Verify(decenarch.Suite, base, p.PublicKey, K, cMinusZero)
+	oneProof := p.Proof.Verify(decenarch.Suite, base, p.PublicKey, K, cMinusOne)
 
-	if (zeroProof != nil && oneProof != nil) || (zeroProof == nil && oneProof == nil) {
-		c <- false
+	// normally the condition would be
+	// (zeroProof != nil && oneProof != nil) || (zeroProof == nil && oneProof == nil),
+	// but since it is by construction impossible that the two proofs are valid at
+	// the same time, we can use only the first contidion in the if clause
+	if zeroProof != nil && oneProof != nil {
+		ch <- false
 	}
-	c <- true
+	ch <- true
+	wg.Done()
 }

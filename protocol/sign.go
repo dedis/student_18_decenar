@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"golang.org/x/net/html"
+	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
 	"gopkg.in/dedis/onet.v2/network"
@@ -51,7 +52,6 @@ func NewSubSignStructuredProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInstan
 func verificationFunctionStructured(msg, data []byte) bool {
 	// unmarshal data
 	_, vfData, err := network.Unmarshal(data, decenarch.Suite)
-
 	if err != nil {
 		log.Lvl1("Impossible ot decode verification data, node refuses to sign")
 		return false
@@ -66,25 +66,78 @@ func verificationFunctionStructured(msg, data []byte) bool {
 		return false
 	}
 
-	// then we get the leaves of the HTML tree...
+	// then we get the leaves of the local HTML tree...
 	listLeaves := lib.ListUniqueDataLeaves(rootNode)
 
 	// ...and the list of the leaves in the proposed consensus HTML tree
 	listLeavesConsensus := vfData.(*VerificationData).Leaves
 
-	// compare the two leaves lists. Note that we test also the order of
-	// the leaves for free here (see the implementation of
-	// lib.ListUniqueDataLeaves)
-	for i := range listLeaves {
-		if listLeaves[i] != listLeavesConsensus[i] {
+	// create a map to check that the local HTML nodes are a subset of the
+	// consensus HTML tree, return false if it is not the case
+	consensusSet := make(map[string]bool)
+	for _, l := range listLeavesConsensus {
+		consensusSet[l] = true
+	}
+
+	// get consensus Bloom filter
+	consensusBloomSet := vfData.(*VerificationData).ConsensusSet
+	consensusParameters := vfData.(*VerificationData).ConsensusParameters
+	consensusCBF := lib.BloomFilterFromSet(consensusBloomSet, []uint{uint(consensusParameters[0]), uint(consensusParameters[1])})
+
+	// check if it is a subset and if the leave is indeed in the consensus
+	// Bloom filter
+	for _, l := range listLeaves {
+		// subset
+		if _, ok := consensusSet[l]; !ok {
+			return false
+		}
+		// consensus Bloom filter
+		if consensusCBF.Count([]byte(l)) == 0 {
 			return false
 		}
 	}
 
-	// verify all the proofs of the protocol
+	// get complete proofs
 	completeProofs := vfData.(*VerificationData).CompleteProofs
-	if !completeProofs.VerifyCompleteProofs() {
+
+	// get conode and root keys
+	conodeKey := vfData.(*VerificationData).ConodeKey
+	// verify all the proofs of the protocol
+	if !completeProofs.VerifyCompleteProofs(conodeKey) {
 		return false
+	}
+
+	// check that root did a correct job, aka audit the leader
+	rootKey := vfData.(*VerificationData).RootKey
+	if conodeKey != rootKey { // root doesn't verify its own work
+		rootProofs := completeProofs[rootKey]
+
+		// first check that the constributions of the root's children indeed
+		// sum up to the consensus filter proposed for the decryption protocol
+		encryptedCBFSet := vfData.(*VerificationData).EncryptedCBFSet
+		if !rootProofs.AggregationProof.VerifyAggregationProofWithAggregation(encryptedCBFSet) {
+			return false
+		}
+
+		// convert byte arrays to kyber.Point arrays
+		partialsKyber := make(map[int][]kyber.Point)
+		for k, p := range vfData.(*VerificationData).Partials {
+			partialsKyber[k] = lib.BytesToAbstractPoints(p)
+		}
+
+		// reconstruct consensus spectral Bloom filter
+		reconstructed, err := lib.ReconstructVectorFromPartials(len(completeProofs), vfData.(*VerificationData).Threshold, partialsKyber)
+		if err != nil {
+			log.Lvl1("Impossible to reconstruct consensus vector, node refuses to sign")
+			return false
+		}
+
+		// check if reconstruction is correct
+		for i := range reconstructed {
+			if reconstructed[i] != consensusBloomSet[i] {
+				return false
+			}
+		}
 	}
 
 	return true

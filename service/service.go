@@ -27,7 +27,6 @@ import (
 	ftcosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
 	"gopkg.in/dedis/cothority.v2/skipchain"
 	"gopkg.in/dedis/kyber.v2"
-	"gopkg.in/dedis/kyber.v2/share"
 	"gopkg.in/dedis/kyber.v2/sign/cosi"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
@@ -44,7 +43,7 @@ func init() {
 	var err error
 	templateID, err = onet.RegisterNewService(decenarch.ServiceName, newService)
 	log.ErrFatal(err)
-	network.RegisterMessages(&Storage{}, SetupPropagation{})
+	network.RegisterMessages(&Storage{}, SetupPropagation{}, ConsensusPropagation{})
 }
 
 // Service is our template-service
@@ -53,10 +52,13 @@ type Service struct {
 	// are correctly handled.
 	*onet.ServiceProcessor
 
+	// used to propagate setup parameters to other conodes
 	propagateSetup messaging.PropagationFunc
 
-	LocalHTMLTree *html.Node // HTML tree received by this node
-	Leaves        []string   // unique leaves of the HTML tree
+	// material for consensus on a single wepage
+	LocalHTMLTree   *html.Node // HTML tree received by this node
+	Leaves          []string   // unique leaves of the HTML tree
+	EncryptedCBFSet *lib.CipherVector
 
 	Storage *Storage
 }
@@ -77,6 +79,13 @@ type Storage struct {
 type SetupPropagation struct {
 	GenesisID skipchain.SkipBlockID
 	Threshold int32
+}
+
+type ConsensusPropagation struct {
+	RootKey             string
+	PartialsBytes       map[int][]byte
+	ConsensusSet        []int64
+	ConsensusParameters []uint64
 }
 
 // Setup is the function called by the service to setup everything is needed
@@ -155,11 +164,11 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 // Save is the function called by the service when a client want to save a website in the
 // archive.
 func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
-	stattimes := make([]string, 0)
 	log.Lvl3("Decenarch Service new SaveWebpage")
 
 	// create the tree
-	tree := req.Roster.GenerateBinaryTree()
+	root := req.Roster.NewRosterWithRoot(s.ServerIdentity())
+	tree := root.GenerateNaryTree(len(req.Roster.List))
 	if tree == nil {
 		return nil, errors.New("error while creating the tree for the consensus protocol")
 	}
@@ -170,7 +179,10 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		return nil, err
 	}
 	structuredConsensusProtocol := instance.(*protocol.ConsensusStructuredState)
-	structuredConsensusProtocol.SharedKey = s.key()
+	structuredConsensusProtocol.SharedKey, err = s.key()
+	if err != nil {
+		return nil, err
+	}
 	structuredConsensusProtocol.Url = req.Url
 
 	// start the protocol
@@ -196,7 +208,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		// get complete proofs of the whole consensus over structured
 		// data protocol
 		s.Storage.Lock()
-		s.Storage.CompleteProofs = structuredConsensusProtocol.CompleteProofsToSend
+		s.Storage.CompleteProofs = structuredConsensusProtocol.CompleteProofs
 		s.Storage.Unlock()
 		s.save()
 
@@ -207,13 +219,13 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		}
 
 		// reconstruct html page
-		msgToSign, err := s.reconstruct(len(req.Roster.List), partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
+		consensusCBF, msgToSign, err := s.reconstruct(len(req.Roster.List), partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
 		if err != nil {
 			return nil, err
 		}
 
 		// sign the consensus website found
-		sig, sigErr := s.sign(tree, msgToSign, true)
+		sig, sigErr := s.sign(tree, msgToSign, partials, consensusCBF, structuredConsensusProtocol.ParametersCBF, true)
 		if sigErr != nil {
 			return nil, sigErr
 		}
@@ -275,7 +287,8 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 				mts := unstructuredConsensusProtocol.MsgToSign
 
 				// sign the consensus additional data
-				as, err := s.sign(tree, mts, false)
+				// consensus Bloom filter is not needed for additional data
+				as, err := s.sign(tree, mts, nil, nil, nil, false)
 				if err != nil {
 					log.Error(err)
 				}
@@ -317,7 +330,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	s.Storage.Unlock()
 	s.save()
 
-	return &decenarch.SaveResponse{Times: stattimes}, nil
+	return &decenarch.SaveResponse{}, nil
 }
 
 func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[int][]kyber.Point, error) {
@@ -341,35 +354,20 @@ func (s *Service) decrypt(t *onet.Tree, encryptedCBFSet *lib.CipherVector) (map[
 	return p.Partials, nil
 }
 
-func (s *Service) reconstruct(nodes int, partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) ([]byte, error) {
-	points := make([]kyber.Point, 0)
-	n := nodes
-	for i := 0; i < len(partials[0]); i++ {
-		shares := make([]*share.PubShare, n)
-		for j, partial := range partials {
-			shares[j] = &share.PubShare{I: j, V: partial[i]}
-		}
-		message, err := share.RecoverCommit(decenarch.Suite, shares, int(s.threshold()), n)
-		if err != nil {
-			return nil, err
-		}
-		points = append(points, message)
-	}
-
-	// reconstruct the points using by computing the dlog
-	reconstructed := make([]int64, 0)
-	for _, point := range points {
-		reconstructed = append(reconstructed, lib.GetPointToInt(point))
+func (s *Service) reconstruct(nodes int, partials map[int][]kyber.Point, localTree *html.Node, paramCBF []uint) ([]int64, []byte, error) {
+	reconstructed, err := lib.ReconstructVectorFromPartials(nodes, int(s.threshold()), partials)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// build the consensus HTML page using the reconstructed Bloom filter
 	consensusCBF := lib.BloomFilterFromSet(reconstructed, paramCBF)
 	htmlPage, err := s.buildConsensusHtmlPage(localTree, consensusCBF)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return htmlPage, nil
+	return reconstructed, htmlPage, nil
 }
 
 // BuildConsensusHtmlPage takes the p.LocalTree of the root made of HTML nodes
@@ -405,7 +403,7 @@ func (s *Service) buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) ([]
 	return page.Bytes(), nil
 }
 
-func (s *Service) sign(t *onet.Tree, msgToSign []byte, structured bool) (*ftcosiservice.SignatureResponse, error) {
+func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.Point, reconstructedCBF []int64, paramCBF []uint, structured bool) (*ftcosiservice.SignatureResponse, error) {
 	// create the protocol depending on the data we want to sign -
 	// structured, i.e. HTML, or unstructured data
 	var pi onet.ProtocolInstance
@@ -441,12 +439,48 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, structured bool) (*ftcosi
 
 	// add data for verification depending on what we want to sign
 	if structured {
-		data := protocol.VerificationData{Leaves: s.uniqueLeaves(), CompleteProofs: s.completeProofs()}
+		// get CBF parameters
+		parametersToMarshal := []uint64{uint64(paramCBF[0]), uint64(paramCBF[1])}
+
+		// set and marshal verification data
+		data := protocol.VerificationData{
+			RootKey:             p.Public().String(),
+			ConodeKey:           p.Public().String(),
+			Leaves:              s.uniqueLeaves(),
+			CompleteProofs:      s.completeProofs(),
+			ConsensusSet:        reconstructedCBF,
+			ConsensusParameters: parametersToMarshal,
+		}
+
 		dataMarshaled, err := network.Marshal(&data)
 		if err != nil {
 			return nil, err
 		}
 		p.Data = dataMarshaled
+		// converts arrays of kyber.Point to arrays of byte for marshaling it
+		partialsBytes := make(map[int][]byte)
+		for k, p := range partials {
+			partialsBytes[k] = lib.AbstractPointsToBytes(p)
+		}
+
+		// pass consensus set and parameters to children
+		childrenData := &ConsensusPropagation{
+			RootKey:             p.Public().String(),
+			ConsensusSet:        reconstructedCBF,
+			ConsensusParameters: parametersToMarshal,
+			PartialsBytes:       partialsBytes,
+		}
+		consensusData, err := network.Marshal(childrenData)
+		createProtocolFunc := func(name string, t *onet.Tree) (onet.ProtocolInstance, error) {
+			pi, err := s.CreateProtocol(name, t)
+			if err != nil {
+				return nil, err
+			}
+			p := pi.(*ftcosiprotocol.SubFtCosi)
+			p.SetConfig(&onet.GenericConfig{Data: consensusData})
+			return p, nil
+		}
+		p.CreateProtocol = ftcosiprotocol.CreateProtocolFunction(createProtocolFunc)
 	}
 
 	// start the protocol
@@ -559,7 +593,10 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			return nil, err
 		}
 		proto := instance.(*protocol.ConsensusStructuredState)
-		proto.SharedKey = s.key()
+		proto.SharedKey, err = s.key()
+		if err != nil {
+			return nil, err
+		}
 		go func() {
 			<-proto.Finished
 			// get local HTML of the conode for later verification of the
@@ -586,6 +623,10 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 		proto := instance.(*protocol.Decrypt)
 		proto.Secret = s.secret()
 		proto.Threshold = s.threshold()
+		go func() {
+			<-proto.Received
+			s.EncryptedCBFSet = proto.EncryptedCBFSet
+		}()
 		return proto, nil
 	// for the sign protocol only the sub protocol is needed here
 	case protocol.NameSubSignStructured:
@@ -594,7 +635,26 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			return nil, err
 		}
 		proto := instance.(*ftcosiprotocol.SubFtCosi)
-		data := protocol.VerificationData{Leaves: s.uniqueLeaves(), CompleteProofs: s.completeProofs()}
+		// set config for children node, since this function is
+		// executed for the children by the subleader
+		proto.SetConfig(conf)
+		// retrieve consensu data
+		_, consensusData, err := network.Unmarshal(conf.Data, decenarch.Suite)
+		if err != nil {
+			return nil, err
+		}
+		// set verification data
+		data := protocol.VerificationData{
+			Threshold:           int(s.threshold()),
+			RootKey:             consensusData.(*ConsensusPropagation).RootKey,
+			Partials:            consensusData.(*ConsensusPropagation).PartialsBytes,
+			ConodeKey:           proto.Public().String(),
+			EncryptedCBFSet:     s.EncryptedCBFSet,
+			Leaves:              s.uniqueLeaves(),
+			CompleteProofs:      s.completeProofs(),
+			ConsensusSet:        consensusData.(*ConsensusPropagation).ConsensusSet,
+			ConsensusParameters: consensusData.(*ConsensusPropagation).ConsensusParameters,
+		}
 		dataMarshaled, err := network.Marshal(&data)
 		if err != nil {
 			return nil, err
@@ -657,10 +717,13 @@ func (s *Service) secret() *lib.SharedSecret {
 }
 
 // key returns the key given by DKG
-func (s *Service) key() kyber.Point {
+func (s *Service) key() (kyber.Point, error) {
 	s.Storage.Lock()
 	defer s.Storage.Unlock()
-	return s.Storage.Secret.X
+	if s.Storage.Secret == nil {
+		return nil, errors.New("Shared public key not found: run setup before saving a webpage")
+	}
+	return s.Storage.Secret.X, nil
 }
 
 func (s *Service) propagateSetupFunc(setupMessage network.Message) {

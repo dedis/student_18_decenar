@@ -30,7 +30,11 @@ func TestService(t *testing.T) {
 
 	for _, s := range services {
 		time.Sleep(100 * time.Millisecond)
-		require.True(t, setupResponse.Key.Equal(s.key()))
+		key, err := s.key()
+		if err != nil {
+			panic(err)
+		}
+		require.True(t, setupResponse.Key.Equal(key))
 	}
 
 	// save web page

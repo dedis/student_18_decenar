@@ -32,8 +32,7 @@ func NewClient() *Client {
 
 // Setup will setup everything is needed for DecenArch
 func (c *Client) Setup(r *onet.Roster) (*SetupResponse, error) {
-	//dst := r.RandomServerIdentity()
-	dst := r.List[0]
+	dst := r.RandomServerIdentity()
 	resp := &SetupResponse{}
 	err := c.SendProtobuf(dst, &SetupRequest{Roster: r}, resp)
 	if err != nil {
@@ -45,8 +44,7 @@ func (c *Client) Setup(r *onet.Roster) (*SetupResponse, error) {
 
 // Save will record the website requested in the conodes
 func (c *Client) Save(r *onet.Roster, url string) (*SaveResponse, error) {
-	//dst := r.RandomServerIdentity()
-	dst := r.List[0]
+	dst := r.RandomServerIdentity()
 	log.Lvl4("Sending message to", dst)
 	resp := &SaveResponse{Times: make([]string, 0)}
 	resp.Times = append(resp.Times, "genstart;"+time.Now().Format(StatTimeFormat))

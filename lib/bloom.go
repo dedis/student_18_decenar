@@ -2,13 +2,11 @@ package lib
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
 	"io"
 	"math"
-	"math/big"
 
-	"golang.org/x/crypto/blake2b"
+	"github.com/spaolacci/murmur3"
 	"golang.org/x/net/html"
 )
 
@@ -163,30 +161,57 @@ func (c *CBF) Encode() ([]byte, error) {
 
 // hashes returns the four hash of e that are used to create
 // the k hash values
-func hashes(e []byte) [2]*big.Int {
-	sumSHA := sha256.Sum256(e)
-	a := new(big.Int)
-	a.SetBytes(sumSHA[:])
-	sumBlake := blake2b.Sum256(e)
-	b := new(big.Int)
-	b.SetBytes(sumBlake[:])
+//func hashes(e []byte) [2]*big.Int {
+//	sumSHA := sha256.Sum256(e)
+//	a := new(big.Int)
+//	a.SetBytes(sumSHA[:])
+//	sumBlake := blake2b.Sum256(e)
+//	b := new(big.Int)
+//	b.SetBytes(sumBlake[:])
+//
+//	return [2]*big.Int{a, b}
+//
+//}
+//
+//// location returns the ith hashed location using the four base hash values
+//// uses a slightly modified version of the double hashing scheme
+//// see https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf
+//func (c *CBF) location(h [2]*big.Int, i uint) uint {
+//	secondHash := new(big.Int)
+//	sum := new(big.Int)
+//	res := new(big.Int)
+//	secondHash.Mul(big.NewInt(int64(i)), h[1])
+//	sum.Add(h[0], secondHash)
+//	res.Mod(sum, big.NewInt(int64(c.M)))
+//
+//	return uint(res.Uint64())
+//}
 
-	return [2]*big.Int{a, b}
-
+// baseHashes returns the four hash values of data that are used to create k
+// hashes
+func hashes(data []byte) [4]uint64 {
+	a1 := []byte{1} // to grab another bit of data
+	// murmur3 is a very fast non-cryptographic hash function, see
+	// https://softwareengineering.stackexchange.com/questions/49550/which-hashing-algorithm-is-best-for-uniqueness-and-speed
+	hasher := murmur3.New128()
+	hasher.Write(data) // #nosec
+	v1, v2 := hasher.Sum128()
+	hasher.Write(a1) // #nosec
+	v3, v4 := hasher.Sum128()
+	return [4]uint64{
+		v1, v2, v3, v4,
+	}
 }
 
 // location returns the ith hashed location using the four base hash values
-// uses a slightly modified version of the double hashing scheme
-// see https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf
-func (c *CBF) location(h [2]*big.Int, i uint) uint {
-	secondHash := new(big.Int)
-	sum := new(big.Int)
-	res := new(big.Int)
-	secondHash.Mul(big.NewInt(int64(i)), h[1])
-	sum.Add(h[0], secondHash)
-	res.Mod(sum, big.NewInt(int64(c.M)))
+func location(h [4]uint64, i uint) uint64 {
+	ii := uint64(i)
+	return h[ii%2] + ii*h[2+(((ii+(ii%2))%4)/2)]
+}
 
-	return uint(res.Uint64())
+// location returns the ith hashed location using the four base hash values
+func (c *CBF) location(h [4]uint64, i uint) uint {
+	return uint(location(h, i) % uint64(c.M))
 }
 
 // bestParameters return an estimate of m and k given the number of elements n
