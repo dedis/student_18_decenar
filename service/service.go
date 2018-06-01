@@ -53,12 +53,14 @@ type Service struct {
 	*onet.ServiceProcessor
 
 	// used to propagate setup parameters to other conodes
-	propagateSetup messaging.PropagationFunc
+	propagateSetup     messaging.PropagationFunc
+	propagateConsensus messaging.PropagationFunc
 
 	// material for consensus on a single wepage
-	LocalHTMLTree   *html.Node // HTML tree received by this node
-	Leaves          []string   // unique leaves of the HTML tree
-	EncryptedCBFSet *lib.CipherVector
+	LocalHTMLTree        *html.Node // HTML tree received by this node
+	Leaves               []string   // unique leaves of the HTML tree
+	EncryptedCBFSet      *lib.CipherVector
+	ConsensusPropagation *ConsensusPropagation
 
 	Storage *Storage
 }
@@ -222,6 +224,31 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		consensusCBF, msgToSign, err := s.reconstruct(len(req.Roster.List), partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
 		if err != nil {
 			return nil, err
+		}
+
+		// propagate consensus result
+		partialsBytes := make(map[int][]byte)
+		for k, p := range partials {
+			partialsBytes[k] = lib.AbstractPointsToBytes(p)
+		}
+
+		// get CBF parameters
+		paramCBF := structuredConsensusProtocol.ParametersCBF
+		parametersToMarshal := []uint64{uint64(paramCBF[0]), uint64(paramCBF[1])}
+
+		// pass consensus set and parameters to children
+		childrenData := &ConsensusPropagation{
+			RootKey:             s.ServerIdentity().Public.String(),
+			ConsensusSet:        consensusCBF,
+			ConsensusParameters: parametersToMarshal,
+			PartialsBytes:       partialsBytes,
+		}
+		replies, err := s.propagateConsensus(req.Roster, childrenData, 10*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		if replies != len(req.Roster.List) {
+			log.Lvl1("Got only", replies, "replies for setup-propagation")
 		}
 
 		// sign the consensus website found
@@ -457,30 +484,7 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.
 			return nil, err
 		}
 		p.Data = dataMarshaled
-		// converts arrays of kyber.Point to arrays of byte for marshaling it
-		partialsBytes := make(map[int][]byte)
-		for k, p := range partials {
-			partialsBytes[k] = lib.AbstractPointsToBytes(p)
-		}
-
-		// pass consensus set and parameters to children
-		childrenData := &ConsensusPropagation{
-			RootKey:             p.Public().String(),
-			ConsensusSet:        reconstructedCBF,
-			ConsensusParameters: parametersToMarshal,
-			PartialsBytes:       partialsBytes,
-		}
-		consensusData, err := network.Marshal(childrenData)
-		createProtocolFunc := func(name string, t *onet.Tree) (onet.ProtocolInstance, error) {
-			pi, err := s.CreateProtocol(name, t)
-			if err != nil {
-				return nil, err
-			}
-			p := pi.(*ftcosiprotocol.SubFtCosi)
-			p.SetConfig(&onet.GenericConfig{Data: consensusData})
-			return p, nil
-		}
-		p.CreateProtocol = ftcosiprotocol.CreateProtocolFunction(createProtocolFunc)
+		p.CreateProtocol = s.CreateProtocol
 	}
 
 	// start the protocol
@@ -635,25 +639,17 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			return nil, err
 		}
 		proto := instance.(*ftcosiprotocol.SubFtCosi)
-		// set config for children node, since this function is
-		// executed for the children by the subleader
-		proto.SetConfig(conf)
-		// retrieve consensu data
-		_, consensusData, err := network.Unmarshal(conf.Data, decenarch.Suite)
-		if err != nil {
-			return nil, err
-		}
 		// set verification data
 		data := protocol.VerificationData{
 			Threshold:           int(s.threshold()),
-			RootKey:             consensusData.(*ConsensusPropagation).RootKey,
-			Partials:            consensusData.(*ConsensusPropagation).PartialsBytes,
+			RootKey:             s.ConsensusPropagation.RootKey,
+			Partials:            s.ConsensusPropagation.PartialsBytes,
 			ConodeKey:           proto.Public().String(),
 			EncryptedCBFSet:     s.EncryptedCBFSet,
 			Leaves:              s.uniqueLeaves(),
 			CompleteProofs:      s.completeProofs(),
-			ConsensusSet:        consensusData.(*ConsensusPropagation).ConsensusSet,
-			ConsensusParameters: consensusData.(*ConsensusPropagation).ConsensusParameters,
+			ConsensusSet:        s.ConsensusPropagation.ConsensusSet,
+			ConsensusParameters: s.ConsensusPropagation.ConsensusParameters,
 		}
 		dataMarshaled, err := network.Marshal(&data)
 		if err != nil {
@@ -726,6 +722,15 @@ func (s *Service) key() (kyber.Point, error) {
 	return s.Storage.Secret.X, nil
 }
 
+func (s *Service) propagateConsensusFunc(consensusMessage network.Message) {
+	m, ok := consensusMessage.(*ConsensusPropagation)
+	if !ok {
+		log.Error("got something else than a setup propagation message")
+		return
+	}
+	s.ConsensusPropagation = m
+}
+
 func (s *Service) propagateSetupFunc(setupMessage network.Message) {
 	m, ok := setupMessage.(*SetupPropagation)
 	if !ok {
@@ -789,6 +794,7 @@ func newService(c *onet.Context) (onet.Service, error) {
 	}
 	var err error
 	s.propagateSetup, err = messaging.NewPropagationFunc(c, "PropagateSetup", s.propagateSetupFunc, -1)
+	s.propagateConsensus, err = messaging.NewPropagationFunc(c, "PropagateConsensus", s.propagateConsensusFunc, -1)
 	log.ErrFatal(err)
 	return s, nil
 }
