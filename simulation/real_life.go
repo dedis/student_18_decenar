@@ -105,7 +105,7 @@ func (s *RealLifeSimulation) Run(config *onet.SimulationConfig) error {
 		<-service.SignChanStop
 		signatureRecord.Record()
 
-		// we don't have additional data here
+		// monitor additional data consensus
 		<-service.AdditionalDataStart
 		additionalDataRound := monitor.NewTimeMeasure("additional_data")
 		<-service.AdditionalDataStop

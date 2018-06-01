@@ -1,6 +1,7 @@
 Servers = 7
 Simulation = "LeavesHTML"
-Hosts = 7
+Hosts = 3
+Depth = 1
 Rounds = 10
 RunWait = "24h"
 Suite = "Ed25519"

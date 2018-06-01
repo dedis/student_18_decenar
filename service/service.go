@@ -483,6 +483,12 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.
 		// get CBF parameters
 		parametersToMarshal := []uint64{uint64(paramCBF[0]), uint64(paramCBF[1])}
 
+		// converts arrays of kyber.Point to arrays of byte for marshaling it
+		partialsBytes := make(map[int][]byte)
+		for k, p := range partials {
+			partialsBytes[k] = lib.AbstractPointsToBytes(p)
+		}
+
 		// set and marshal verification data
 		data := protocol.VerificationData{
 			RootKey:             p.Public().String(),
@@ -491,6 +497,7 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.
 			CompleteProofs:      s.completeProofs(),
 			ConsensusSet:        reconstructedCBF,
 			ConsensusParameters: parametersToMarshal,
+			Partials:            partialsBytes,
 		}
 
 		dataMarshaled, err := network.Marshal(&data)
@@ -498,11 +505,6 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.
 			return nil, err
 		}
 		p.Data = dataMarshaled
-		// converts arrays of kyber.Point to arrays of byte for marshaling it
-		partialsBytes := make(map[int][]byte)
-		for k, p := range partials {
-			partialsBytes[k] = lib.AbstractPointsToBytes(p)
-		}
 
 		// pass consensus set and parameters to children
 		childrenData := &ConsensusPropagation{
@@ -513,12 +515,11 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.
 		}
 		consensusData, err := network.Marshal(childrenData)
 		createProtocolFunc := func(name string, t *onet.Tree) (onet.ProtocolInstance, error) {
-			pi, err := s.CreateProtocol(name, t)
+			p, err := s.CreateProtocol(name, t)
 			if err != nil {
 				return nil, err
 			}
-			p := pi.(*ftcosiprotocol.SubFtCosi)
-			p.SetConfig(&onet.GenericConfig{Data: consensusData})
+			p.(*ftcosiprotocol.SubFtCosi).SetConfig(&onet.GenericConfig{Data: consensusData})
 			return p, nil
 		}
 		p.CreateProtocol = ftcosiprotocol.CreateProtocolFunction(createProtocolFunc)
@@ -676,6 +677,7 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			return nil, err
 		}
 		proto := instance.(*ftcosiprotocol.SubFtCosi)
+		log.Printf("Data before adding %#v\n", proto.Data)
 		// set config for children node, since this function is
 		// executed for the children by the subleader
 		proto.SetConfig(conf)
@@ -830,6 +832,8 @@ func newService(c *onet.Context) (onet.Service, error) {
 		SkipAddStart:                 make(chan bool),
 		SkipAddStop:                  make(chan bool),
 		SaveStop:                     make(chan bool),
+		AdditionalDataStart:          make(chan bool),
+		AdditionalDataStop:           make(chan bool),
 	}
 	if err := s.RegisterHandlers(s.Setup, s.SaveWebpage, s.Retrieve); err != nil {
 		log.Error(err, "Couldn't register messages")
