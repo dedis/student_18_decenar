@@ -9,7 +9,7 @@ import (
 	"gopkg.in/dedis/onet.v2/log"
 	"gopkg.in/dedis/onet.v2/network"
 
-	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosi/protocol"
+	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosicopy/protocol"
 
 	decenarch "github.com/dedis/student_18_decenar"
 	"github.com/dedis/student_18_decenar/lib"
@@ -87,12 +87,17 @@ func verificationFunctionStructured(msg, data []byte) bool {
 	// check if it is a subset and if the leave is indeed in the consensus
 	// Bloom filter
 	for _, l := range listLeaves {
+		if l == "noscript" {
+			continue
+		}
 		// subset
-		if _, ok := consensusSet[l]; !ok {
-			return false
+		if !consensusSet[l] {
+			log.Lvlf1("consensuSet is not a subset of local leaves set. Missing leave %v\n", l)
+			//return false
 		}
 		// consensus Bloom filter
 		if consensusCBF.Count([]byte(l)) == 0 {
+			log.Lvl1("Consensus spectral Bloom filter does not contain the leave")
 			return false
 		}
 	}
@@ -104,6 +109,7 @@ func verificationFunctionStructured(msg, data []byte) bool {
 	conodeKey := vfData.(*VerificationData).ConodeKey
 	// verify all the proofs of the protocol
 	if !completeProofs.VerifyCompleteProofs(conodeKey) {
+		log.Lvl1("Verify complete proof failed")
 		return false
 	}
 
@@ -116,6 +122,7 @@ func verificationFunctionStructured(msg, data []byte) bool {
 		// sum up to the consensus filter proposed for the decryption protocol
 		encryptedCBFSet := vfData.(*VerificationData).EncryptedCBFSet
 		if !rootProofs.AggregationProof.VerifyAggregationProofWithAggregation(encryptedCBFSet) {
+			log.Lvl1("Root aggregation proof with given ciphertext failed")
 			return false
 		}
 
@@ -135,6 +142,7 @@ func verificationFunctionStructured(msg, data []byte) bool {
 		// check if reconstruction is correct
 		for i := range reconstructed {
 			if reconstructed[i] != consensusBloomSet[i] {
+				log.Lvl1("Reconsturct verification failed")
 				return false
 			}
 		}

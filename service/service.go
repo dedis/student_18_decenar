@@ -23,8 +23,8 @@ import (
 	skip "github.com/dedis/student_18_decenar/skip"
 	"gopkg.in/dedis/cothority.v2/messaging"
 
-	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosi/protocol"
 	ftcosiservice "gopkg.in/dedis/cothority.v2/ftcosi/service"
+	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosicopy/protocol"
 	"gopkg.in/dedis/cothority.v2/skipchain"
 	"gopkg.in/dedis/kyber.v2"
 	"gopkg.in/dedis/kyber.v2/sign/cosi"
@@ -281,7 +281,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 		// sign the consensus website found
 		s.SignChanStart <- true
-		sig, sigErr := s.sign(tree, msgToSign, partials, consensusCBF, structuredConsensusProtocol.ParametersCBF, true)
+		sig, sigErr := s.sign(req.Roster, msgToSign, partials, consensusCBF, structuredConsensusProtocol.ParametersCBF, true)
 		if sigErr != nil {
 			return nil, sigErr
 		}
@@ -349,7 +349,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 				// sign the consensus additional data
 				// consensus Bloom filter is not needed for additional data
-				as, err := s.sign(tree, mts, nil, nil, nil, false)
+				as, err := s.sign(req.Roster, mts, nil, nil, nil, false)
 				if err != nil {
 					log.Error(err)
 				}
@@ -471,20 +471,30 @@ func (s *Service) buildConsensusHtmlPage(localTree *html.Node, CBF *lib.CBF) ([]
 	return page.Bytes(), nil
 }
 
-func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.Point, reconstructedCBF []int64, paramCBF []uint, structured bool) (*ftcosiservice.SignatureResponse, error) {
+func (s *Service) sign(r *onet.Roster, msgToSign []byte, partials map[int][]kyber.Point, reconstructedCBF []int64, paramCBF []uint, structured bool) (*ftcosiservice.SignatureResponse, error) {
+	// generate the tree
+	nNodes := len(r.List)
+	rooted := r.NewRosterWithRoot(s.ServerIdentity())
+	if rooted == nil {
+		return nil, errors.New("we're not in the roster")
+	}
+	tree := rooted.GenerateNaryTree(nNodes)
+	if tree == nil {
+		return nil, errors.New("failed to generate tree")
+	}
 	// create the protocol depending on the data we want to sign -
 	// structured, i.e. HTML, or unstructured data
 	var pi onet.ProtocolInstance
 	var err error
 	if structured {
 		// protocol instance
-		pi, err = s.CreateProtocol(protocol.NameSignStructured, t)
+		pi, err = s.CreateProtocol(protocol.NameSignStructured, tree)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		// protocol instance
-		pi, err = s.CreateProtocol(protocol.NameSignUnstructured, t)
+		pi, err = s.CreateProtocol(protocol.NameSignUnstructured, tree)
 		if err != nil {
 			return nil, err
 		}
@@ -496,7 +506,7 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.
 	p.Msg = msgToSign
 	// We set NSubtrees to the cube root of n to evenly distribute the load,
 	// i.e. depth (=3) = log_f n, where f is the fan-out (branching factor).
-	p.NSubtrees = int(math.Pow(float64(t.Size()), 1.0/3.0))
+	p.NSubtrees = int(math.Pow(float64(nNodes), 1.0/3.0))
 	if p.NSubtrees < 1 {
 		p.NSubtrees = 1
 	}
@@ -532,7 +542,6 @@ func (s *Service) sign(t *onet.Tree, msgToSign []byte, partials map[int][]kyber.
 			return nil, err
 		}
 		p.Data = dataMarshaled
-		p.CreateProtocol = s.CreateProtocol
 	}
 
 	// start the protocol
@@ -680,7 +689,31 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 			s.EncryptedCBFSet = proto.EncryptedCBFSet
 		}()
 		return proto, nil
-	// for the sign protocol only the sub protocol is needed here
+		// for the sign protocol only the sub protocol is needed here
+		//	case protocol.NameSignStructured:
+		//		instance, err := protocol.NewSignStructuredProtocol(node)
+		//		if err != nil {
+		//			return nil, err
+		//		}
+		//		proto := instance.(*ftcosiprotocol.FtCosi)
+		//		// set verification data
+		//		data := protocol.VerificationData{
+		//			Threshold:           int(s.threshold()),
+		//			RootKey:             s.ConsensusPropagation.RootKey,
+		//			Partials:            s.ConsensusPropagation.PartialsBytes,
+		//			ConodeKey:           proto.Public().String(),
+		//			EncryptedCBFSet:     s.EncryptedCBFSet,
+		//			Leaves:              s.uniqueLeaves(),
+		//			CompleteProofs:      s.completeProofs(),
+		//			ConsensusSet:        s.ConsensusPropagation.ConsensusSet,
+		//			ConsensusParameters: s.ConsensusPropagation.ConsensusParameters,
+		//		}
+		//		dataMarshaled, err := network.Marshal(&data)
+		//		if err != nil {
+		//			return nil, err
+		//		}
+		//		proto.Data = dataMarshaled
+		//		return proto, nil
 	case protocol.NameSubSignStructured:
 		instance, err := protocol.NewSubSignStructuredProtocol(node)
 		if err != nil {
