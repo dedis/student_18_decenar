@@ -9,8 +9,10 @@ import (
 	"gopkg.in/dedis/onet.v2/network"
 
 	"github.com/dedis/onet/log"
+	decenarch "github.com/dedis/student_18_decenar"
 	"github.com/dedis/student_18_decenar/lib"
 	"gopkg.in/dedis/kyber.v2"
+	"gopkg.in/dedis/kyber.v2/proof/dleq"
 )
 
 // NameReconstruct is the protocol identifier string.
@@ -85,19 +87,25 @@ func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
 	d.EncryptedCBFSet = prompt.EncryptedCBFSet
 
 	// partially decrypt
-	partials := d.getPartials(prompt.EncryptedCBFSet)
+	partials, proofs := d.getPartials(prompt.EncryptedCBFSet)
 
 	// we can store encrypted filter
 	d.Received <- true
 
 	// send partials to root
-	return d.SendTo(d.Root(), &SendPartial{partials})
+	msg := &SendPartial{
+		Partials:       partials,
+		Proofs:         proofs,
+		PublicKeyShare: decenarch.Suite.Point().Mul(d.Secret.V, nil),
+	}
+	return d.SendTo(d.Root(), msg)
 }
 
 // HandlePartial
 func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
+	log.Lvl3(d.ServerIdentity().Address, "got partials from", reply.Name(), "partials", len(d.Partials))
 	// handle the case in which a conode refuses to send its partial
-	if reply.Partial == nil {
+	if reply.Partials == nil {
 		log.Lvl1("Node", reply.ServerIdentity, "refused to reply")
 		d.Failures++
 		if d.Failures > len(d.Roster().List)-int(d.Threshold) {
@@ -107,14 +115,36 @@ func (d *Decrypt) HandlePartial(reply MessageSendPartial) error {
 		return nil
 	}
 
-	log.Lvl3(d.ServerIdentity().Address, "got partials from", reply.Name(), "partials", len(d.Partials), "threshold", int(d.Threshold-1))
+	// verify the proofs of the partials
+	base := decenarch.Suite.Point().Base()
+	for i, p := range reply.Proofs {
+		c := &(*d.EncryptedCBFSet)[i]
+		ver := p.Verify(decenarch.Suite, base, c.K, reply.PublicKeyShare, decenarch.Suite.Point().Sub(c.C, reply.Partials[i]))
+		if ver != nil {
+			log.Print("Failed")
+			log.Lvl1("Node", reply.ServerIdentity, "sended invalid partials")
+			d.Failures++
+			if d.Failures > len(d.Roster().List)-int(d.Threshold) {
+				log.Lvl2(reply.ServerIdentity, "couldn't get enough shares")
+				d.finish(false)
+			}
+			return nil
+		}
+	}
+
+	// finally add the partials of the user
 	d.mutex.Lock()
-	d.Partials[reply.RosterIndex] = reply.Partial
+	d.Partials[reply.RosterIndex] = reply.Partials
+	d.mutex.Unlock()
+
+	// if enough shares from children, add partials of root
 	if len(d.Partials) >= int(d.Threshold-1) {
-		d.Partials[d.Index()] = d.getPartials(d.EncryptedCBFSet)
+		// we don't need the proofs of the leader
+		d.mutex.Lock()
+		d.Partials[d.Index()], _ = d.getPartials(d.EncryptedCBFSet)
+		d.mutex.Unlock()
 		d.finish(true)
 	}
-	d.mutex.Unlock()
 
 	return nil
 }
@@ -134,8 +164,10 @@ func (d *Decrypt) finish(result bool) {
 }
 
 // getPartials
-func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
+func (d *Decrypt) getPartials(cipher *lib.CipherVector) ([]kyber.Point, []*dleq.Proof) {
 	partials := make([]kyber.Point, len(*cipher))
+	proofs := make([]*dleq.Proof, len(*cipher))
+	base := decenarch.Suite.Point().Base()
 	var wg sync.WaitGroup
 	if lib.PARALLELIZE {
 		for i := 0; i < len(*cipher); i = i + lib.VPARALLELIZE {
@@ -144,6 +176,8 @@ func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
 				for j := 0; j < lib.VPARALLELIZE && (j+i < len(*cipher)); j++ {
 					c := &(*cipher)[i+j]
 					partials[i+j] = lib.DecryptPoint(d.Secret.V, lib.CipherText{K: c.K, C: c.C})
+					p, _, _, _ := dleq.NewDLEQProof(decenarch.Suite, base, c.K, d.Secret.V)
+					proofs[i+j] = p
 				}
 				defer wg.Done()
 			}(i)
@@ -153,8 +187,10 @@ func (d *Decrypt) getPartials(cipher *lib.CipherVector) []kyber.Point {
 	} else {
 		for i, c := range *cipher {
 			partials[i] = lib.DecryptPoint(d.Secret.V, lib.CipherText{K: c.K, C: c.C})
+			p, _, _, _ := dleq.NewDLEQProof(decenarch.Suite, base, c.K, d.Secret.V)
+			proofs[i] = p
 		}
 	}
 
-	return partials
+	return partials, proofs
 }
