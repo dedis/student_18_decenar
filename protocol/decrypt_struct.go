@@ -3,6 +3,7 @@ package protocol
 import (
 	"github.com/dedis/student_18_decenar/lib"
 	"gopkg.in/dedis/kyber.v2"
+	"gopkg.in/dedis/kyber.v2/proof/dleq"
 	"gopkg.in/dedis/onet.v2"
 )
 
@@ -19,7 +20,9 @@ type MessagePromptDecrypt struct {
 }
 
 type SendPartial struct {
-	Partial []kyber.Point
+	Partials       []kyber.Point
+	Proofs         []*dleq.Proof
+	PublicKeyShare kyber.Point
 }
 
 type MessageSendPartial struct {

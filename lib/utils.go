@@ -164,7 +164,7 @@ func ReconstructVectorFromPartials(nodes, threshold int, partials map[int][]kybe
 		points = append(points, message)
 	}
 
-	// reconstruct the points using by computing the dlog
+	// reconstruct the points by computing the dlog
 	reconstructed := make([]int64, 0)
 	for _, point := range points {
 		reconstructed = append(reconstructed, GetPointToInt(point))

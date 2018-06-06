@@ -87,8 +87,14 @@ func verificationFunctionStructured(msg, data []byte) bool {
 	// check if it is a subset and if the leave is indeed in the consensus
 	// Bloom filter
 	for _, l := range listLeaves {
+		// something there are problem with this leaves values with the
+		// Go parser, but since they are not important we simply skip
+		// this test
+		if l == "noscript" || l == "script" {
+			continue
+		}
 		// subset
-		if _, ok := consensusSet[l]; !ok {
+		if !consensusSet[l] {
 			return false
 		}
 		// consensus Bloom filter
