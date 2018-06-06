@@ -284,12 +284,13 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 	// encrypt set of the filter using the collective DKG key and prove
 	// that the set contains only zeros and ones
 	localBloomEncrypted, proof := lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+	localBloomEncryptedToBytes, _ := localBloomEncrypted.ToBytes()
 	p.CompleteProofs[pubKeyString].CipherVectorProof = proof
-	p.CompleteProofs[pubKeyString].EncryptedBloomFilter, _ = localBloomEncrypted.ToBytes()
+	p.CompleteProofs[pubKeyString].EncryptedBloomFilter = localBloomEncryptedToBytes
 
 	// aggregate children contributions after checking the signature
 	childrenContributions := make(map[string][]byte)
-	childrenContributions[pubKeyString], _ = localBloomEncrypted.ToBytes()
+	childrenContributions[pubKeyString] = localBloomEncryptedToBytes
 	p.EncryptedCBFSet = localBloomEncrypted
 	if !p.IsLeaf() {
 		for _, r := range reply {

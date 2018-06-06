@@ -315,66 +315,54 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	addsLinks := ExtractPageExternalLinks(webmain.Url, bytes.NewBuffer(bytePage))
 
 	// iterate over additional links and retrieve the content
-	var wg sync.WaitGroup
 	webadds := make([]decenarch.Webstore, len(addsLinks))
 	webmain.AddsUrl = make([]string, len(addsLinks))
 	s.AdditionalDataStart <- true
 	for i, al := range addsLinks {
-		wg.Add(1)
-		go func(i int, al string) {
-			log.Lvl4("Get additional", al)
-			api, err := s.CreateProtocol(protocol.NameConsensusUnstructured, tree)
-			if err != nil {
-				// If there is an error for additional data we
-				// do not return an error, we simply inform the
-				// user and handle the next additional data
-				log.Infof("Error during unstructured consensus protocol for additional link %v: %v\n", al, err)
-				wg.Done()
-				return
-			}
-			unstructuredConsensusProtocol := api.(*protocol.ConsensusUnstructuredState)
-			unstructuredConsensusProtocol.Url = al
-			unstructuredConsensusProtocol.Threshold = uint32(s.threshold())
-			err = api.Start()
-			if err != nil {
-				log.Infof("Error during unstructured consensus protocol for additional link %v: %v\n", al, err)
-				wg.Done()
-				return
-			}
-			select {
-			case <-unstructuredConsensusProtocol.Finished:
-				ru := unstructuredConsensusProtocol.Url
-				ct := unstructuredConsensusProtocol.ContentType
-				mts := unstructuredConsensusProtocol.MsgToSign
+		log.Lvl4("Get additional", al)
+		api, err := s.CreateProtocol(protocol.NameConsensusUnstructured, tree)
+		if err != nil {
+			// If there is an error for additional data we
+			// do not return an error, we simply inform the
+			// user and handle the next additional data
+			log.Infof("Error during unstructured consensus protocol for additional link %v: %v\n", al, err)
+		}
+		unstructuredConsensusProtocol := api.(*protocol.ConsensusUnstructuredState)
+		unstructuredConsensusProtocol.Url = al
+		unstructuredConsensusProtocol.Threshold = uint32(s.threshold())
+		err = api.Start()
+		if err != nil {
+			log.Infof("Error during unstructured consensus protocol for additional link %v: %v\n", al, err)
+		}
+		select {
+		case <-unstructuredConsensusProtocol.Finished:
+			ru := unstructuredConsensusProtocol.Url
+			ct := unstructuredConsensusProtocol.ContentType
+			mts := unstructuredConsensusProtocol.MsgToSign
 
-				// sign the consensus additional data
-				// consensus Bloom filter is not needed for additional data
-				as, err := s.sign(req.Roster, mts, nil, nil, nil, false)
-				if err != nil {
-					log.Error(err)
-				}
-
-				// create storing structure
-				aweb := decenarch.Webstore{
-					Url:         ru,
-					ContentType: ct,
-					Sig:         as,
-					Page:        base64.StdEncoding.EncodeToString(mts),
-					AddsUrl:     make([]string, 0),
-					Timestamp:   mainTimestamp,
-				}
-				webadds[i] = aweb
-				webmain.AddsUrl[i] = al
-			case <-time.After(timeout):
-				log.Infof("Timeout for unstructured consensus protocol for additional link %v: %v\n", al, err)
+			// sign the consensus additional data
+			// consensus Bloom filter is not needed for additional data
+			as, err := s.sign(req.Roster, mts, nil, nil, nil, false)
+			if err != nil {
+				log.Error(err)
 			}
-			// done with this additional link
-			wg.Done()
-		}(i, al)
+
+			// create storing structure
+			aweb := decenarch.Webstore{
+				Url:         ru,
+				ContentType: ct,
+				Sig:         as,
+				Page:        base64.StdEncoding.EncodeToString(mts),
+				AddsUrl:     make([]string, 0),
+				Timestamp:   mainTimestamp,
+			}
+			webadds[i] = aweb
+			webmain.AddsUrl[i] = al
+		case <-time.After(timeout):
+			log.Infof("Timeout for unstructured consensus protocol for additional link %v: %v\n", al, err)
+		}
+		// done with this additional link
 	}
-	// wait for all the additional to be retrieved and stored
-	wg.Wait()
-
 	// add additional data to the slice of storing structures
 	webadds = append(webadds, webmain)
 	s.AdditionalDataStop <- true

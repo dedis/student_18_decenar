@@ -75,7 +75,7 @@ func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
 	service := config.GetService("Decenarch").(*service.Service)
 	for round := 0; round < s.Rounds; round++ {
 		log.Lvl1("Starting round", round)
-		completeRound := monitor.NewTimeMeasure("Complete round")
+		completeRound := monitor.NewTimeMeasure("complete_round")
 
 		// save
 		log.Print("Webpage", s.Webpage)
@@ -113,7 +113,7 @@ func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
 		<-service.SaveStop
 		completeRound.Record()
 
-		time.Sleep(1 * time.Minute)
+		time.Sleep(20 * time.Second)
 	}
 
 	return nil

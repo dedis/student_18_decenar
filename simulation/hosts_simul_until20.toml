@@ -1,0 +1,17 @@
+Servers = 30
+Simulation = "Hosts"
+Depth = 1
+Rounds = 5
+RunWait = "24h"
+Suite = "Ed25519"
+
+Hosts
+3
+5
+10
+15
+20
+30
+40
+50
+60

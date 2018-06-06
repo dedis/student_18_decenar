@@ -1,10 +1,15 @@
 Servers = 10
 Simulation = "LeavesHTML"
-BF = 2
+Depth = 2
 Hosts = 7
-Rounds = 7
+Rounds = 10
 RunWait = "24h"
 Suite = "Ed25519"
 
 Webpage
-"https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/4096.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/64.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/128.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/256.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/512.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/1024.html"
+"https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/2048.html"
