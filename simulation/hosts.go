@@ -69,7 +69,7 @@ func (s *HostsSimulation) Run(config *onet.SimulationConfig) error {
 		log.Error(err)
 	}
 
-	webpage := "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/256.html"
+	webpage := "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/512.html"
 
 	// get appropiate service
 	service := config.GetService("Decenarch").(*service.Service)
