@@ -115,7 +115,5 @@ func (s *HostsSimulation) Run(config *onet.SimulationConfig) error {
 		time.Sleep(1 * time.Minute)
 	}
 
-	time.Sleep(4 * time.Minute)
-
 	return nil
 }

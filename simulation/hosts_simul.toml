@@ -1,9 +1,8 @@
-Servers = 30
+Servers = 256
 Simulation = "Hosts"
 Depth = 1
-Rounds = 2
+Rounds = 5
 RunWait = "24h"
-Suite = "Ed25519"
 
 Hosts
 30
