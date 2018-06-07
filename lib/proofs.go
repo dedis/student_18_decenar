@@ -25,12 +25,9 @@ type CompleteProof struct {
 	EncryptedBloomFilter     []byte
 }
 
-func (p *CompleteProofs) VerifyCompleteProofs(conodeKey string) bool {
-	for key, v := range *p {
-		// do not verify my own proofs
-		if key == conodeKey {
-			continue
-		}
+func (p *CompleteProofs) VerifyCompleteProofs() bool {
+	for _, v := range *p {
+		// verify also my proof, to be suere that root did nothing wrong
 		if !v.VerifyCompleteProof() {
 			return false
 		}

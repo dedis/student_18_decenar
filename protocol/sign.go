@@ -105,15 +105,15 @@ func verificationFunctionStructured(msg, data []byte) bool {
 	// get complete proofs
 	completeProofs := vfData.(*VerificationData).CompleteProofs
 
-	// get conode and root keys
-	conodeKey := vfData.(*VerificationData).ConodeKey
 	// verify all the proofs of the protocol
-	if !completeProofs.VerifyCompleteProofs(conodeKey) {
+	if !completeProofs.VerifyCompleteProofs() {
 		log.Lvl1("Verify complete proof failed")
 		return false
 	}
 
 	// check that root did a correct job, aka audit the leader
+	// get conode and root keys
+	conodeKey := vfData.(*VerificationData).ConodeKey
 	rootKey := vfData.(*VerificationData).RootKey
 	if conodeKey != rootKey { // root doesn't verify its own work
 		rootProofs := completeProofs[rootKey]
