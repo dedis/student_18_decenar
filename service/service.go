@@ -8,6 +8,7 @@ runs on the node.
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/dedis/student_18_decenar/lib"
 	"github.com/dedis/student_18_decenar/protocol"
 	skip "github.com/dedis/student_18_decenar/skip"
+	"github.com/fatih/color"
 	"gopkg.in/dedis/cothority.v2/messaging"
 
 	ftcosiprotocol "gopkg.in/dedis/cothority.v2/ftcosi/protocol"
@@ -100,13 +102,19 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	s.Storage.Unlock()
 	s.save()
 
+	// print setup phase
+	lib.YellowPrint("Setup phase\n")
+
 	// start a new skipchain only if there isn't one already
 	if s.genesisID() == nil {
 		client := skip.NewSkipClient(int(s.threshold()))
+		// print skipchain start
+		fmt.Print("   Start skipchain...")
 		genesis, err := client.SkipStart(req.Roster)
 		if err != nil {
 			return nil, err
 		}
+		color.Green("OK\n")
 
 		// store genesisID and latestID
 		s.Storage.Lock()
@@ -141,6 +149,7 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	protocol := instance.(*protocol.SetupDKG)
 	protocol.Wait = true
 
+	fmt.Print("   Distributed key generation...")
 	err = protocol.Start()
 	if err != nil {
 		return nil, err
@@ -148,6 +157,8 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 
 	select {
 	case <-protocol.Done:
+		color.Green("OK\n")
+
 		secret, err := lib.NewSharedSecret(protocol.DKG)
 		if err != nil {
 			return nil, err
@@ -166,6 +177,8 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 // Save is the function called by the service when a client want to save a website in the
 // archive.
 func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
+	fmt.Println("")
+	lib.YellowPrint("Store phase with URL: %v\n", req.Url)
 	log.Lvl3("Decenarch Service new SaveWebpage")
 
 	// create the tree
@@ -188,6 +201,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	structuredConsensusProtocol.Url = req.Url
 
 	// start the protocol
+	fmt.Println("   Start consensus for HTML document")
 	err = structuredConsensusProtocol.Start()
 	if err != nil {
 		return nil, err

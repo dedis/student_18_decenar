@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/dedis/student_18_decenar/lib"
 	"gopkg.in/dedis/cothority.v2"
 	"gopkg.in/dedis/kyber.v2"
 	dkg "gopkg.in/dedis/kyber.v2/share/dkg/rabin"
@@ -132,6 +133,8 @@ func (o *SetupDKG) Dispatch() error {
 
 // Children reactions
 func (o *SetupDKG) childInit(i structInit) error {
+	lib.YellowPrint("Setup phase\n")
+	fmt.Println("   Received DKG announcement from leader")
 	o.Wait = i.Wait
 	log.Lvl3(o.Name(), o.Wait)
 	return o.SendToParent(&InitReply{Public: o.keypair.Public})

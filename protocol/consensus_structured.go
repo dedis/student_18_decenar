@@ -12,6 +12,7 @@ node will only use the `Handle`-methods, and not call `Start` again.
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	urlpkg "net/url"
 	"regexp"
@@ -111,9 +112,11 @@ func (p *ConsensusStructuredState) Start() error {
 // begining and end but each time a different 'case'. Each one can be
 // considered as an independant function.
 func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructured) error {
+	lib.YellowPrint("Retrieve phase\n")
 	log.Lvl4("Handling", p)
 	log.Lvl4("And the message", msg)
 	p.Url = msg.SaveAnnounceStructured.Url
+	fmt.Println("   Received announcement with URL", msg.SaveAnnounceStructured.Url, "and Bloom filter's parameters", msg.SaveAnnounceStructured.ParametersCBF)
 
 	// get local version of the webpage
 	tree, err := p.GetLocalHTMLData()
