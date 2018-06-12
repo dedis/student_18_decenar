@@ -1,0 +1,12 @@
+Simulation = "RealLife"
+Servers = 2
+Depth = 1
+Hosts = 16
+Rounds = 3
+#RunWait = "24h"
+Suite = "Ed25519"
+Delay = 100
+
+Webpage
+"http://tass.com/politics/1007602"
+"https://twitter.com/ignaziocassis"
