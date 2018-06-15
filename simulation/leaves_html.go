@@ -1,8 +1,6 @@
 package main
 
 import (
-	"time"
-
 	"github.com/BurntSushi/toml"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
@@ -112,8 +110,6 @@ func (s *LeavesHTMLSimulation) Run(config *onet.SimulationConfig) error {
 		// record complete round
 		<-service.SaveStop
 		completeRound.Record()
-
-		time.Sleep(20 * time.Second)
 	}
 
 	return nil

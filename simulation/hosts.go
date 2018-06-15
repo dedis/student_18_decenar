@@ -1,8 +1,6 @@
 package main
 
 import (
-	"time"
-
 	"github.com/BurntSushi/toml"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
@@ -58,7 +56,7 @@ func (s *HostsSimulation) Node(config *onet.SimulationConfig) error {
 
 func (s *HostsSimulation) Run(config *onet.SimulationConfig) error {
 	size := config.Tree.Size()
-	log.Lvl2("Size is:", size, "rounds:", s.Rounds)
+	log.LLvl2("Size is:", size, "rounds:", s.Rounds)
 
 	// create new client
 	c := decenarch.NewClient()
@@ -69,12 +67,12 @@ func (s *HostsSimulation) Run(config *onet.SimulationConfig) error {
 		log.Error(err)
 	}
 
-	webpage := "https://cdn.rawgit.com/dedis/student_18_decenar/cf370eae/simulation/test_input/leaves/512.html"
+	webpage := "https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/512.html"
 
 	// get appropiate service
 	service := config.GetService("Decenarch").(*service.Service)
 	for round := 0; round < s.Rounds; round++ {
-		log.Lvl1("Starting round", round)
+		log.Lvl1("Starting round", round, "with size", size)
 		completeRound := monitor.NewTimeMeasure("Complete round")
 
 		// save
@@ -111,8 +109,6 @@ func (s *HostsSimulation) Run(config *onet.SimulationConfig) error {
 		// record complete round
 		<-service.SaveStop
 		completeRound.Record()
-
-		time.Sleep(1 * time.Minute)
 	}
 
 	return nil

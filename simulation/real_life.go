@@ -1,8 +1,6 @@
 package main
 
 import (
-	"time"
-
 	"github.com/BurntSushi/toml"
 	"gopkg.in/dedis/onet.v2"
 	"gopkg.in/dedis/onet.v2/log"
@@ -114,8 +112,6 @@ func (s *RealLifeSimulation) Run(config *onet.SimulationConfig) error {
 		// record complete round
 		<-service.SaveStop
 		completeRound.Record()
-
-		time.Sleep(time.Minute)
 	}
 
 	return nil

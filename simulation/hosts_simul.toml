@@ -1,14 +1,13 @@
-Servers = 256
 Simulation = "Hosts"
+Servers = 2
 Depth = 1
 Rounds = 5
-RunWait = "24h"
+Suite = "Ed25519"
+Delay = 100
+#RunWait = "24h"
 
 Hosts
-30
-50
-90
-128
-160
-200
-256
+7
+16
+32
+64

@@ -1,10 +1,11 @@
-Servers = 10
 Simulation = "LeavesHTML"
-Depth = 2
-Hosts = 7
-Rounds = 10
-RunWait = "24h"
+Servers = 2
+Depth = 1
+Hosts = 16
+Rounds = 5
+#RunWait = "24h"
 Suite = "Ed25519"
+Delay = 100
 
 Webpage
 "https://cdn.rawgit.com/dedis/student_18_decenar/simulation/simulation/test_input/leaves/64.html"

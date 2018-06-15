@@ -1,19 +1,17 @@
-Servers = 10
 Simulation = "RealLife"
-BF = 2
-Hosts = 7
-Rounds = 3
-RunWait = "24h"
+Servers = 2
+Depth = 1
+Hosts = 16
+Rounds = 5
+#RunWait = "24h"
 Suite = "Ed25519"
+Delay = 100
 
 Webpage
 "http://www.bbc.com/news/world-europe-44313905"
-"https://blog.golang.org/"
 "http://www.20min.ch/ro/"
 "http://www.20min.ch/ro/news/monde/story/L-UE-repliquera-de-fa-on--unie--aux-sanctions-US-27701771"
-"https://www.cnbc.com/2018/06/02/amazon-not-liable-for-exploding-hoverboard-marketplace-argument-wins.html"
 "https://www.internazionale.it/bloc-notes/2018/05/31/governo-italiano-fantasma-stampa-straniera"
 "https://www.theguardian.com/cities/2018/may/09/fuck-off-google-the-berlin-neighbourhood-fighting-off-a-tech-giant-kreuzberg"
-"https://blog.cryptographyengineering.com/2018/05/17/was-the-efail-disclosure-horribly-screwed-up/"
 "https://twitter.com/ignaziocassis"
 "http://tass.com/politics/1007602"
