@@ -51,6 +51,7 @@ ax.bar(ind, consensus, width, color=palette[0], label='Consensus structured')
 ax.bar(ind + width, decrypt, width, color=palette[1], label='Decrypt')
 ax.bar(ind + 2*width, reconstruct, width, color=palette[2], label='Reconstruct')
 ax.bar(ind + 3*width, sign, width, color=palette[3], label='Signature')
+ax.plot(ind + 3/2*width, consensus+decrypt+reconstruct+sign, color = 'black', label='Total')
 ax.set_xticks(ind + width * 3/2)
 ax.set_xticklabels(x_values)
 

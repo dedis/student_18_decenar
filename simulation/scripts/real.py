@@ -17,7 +17,7 @@ if len(sys.argv) != 2:
 data = get_data(sys.argv[1])
 
 # x axis
-x_values = [i for i in range(1, 11)]
+x_values = [i for i in range(1, 8)]
 
 # data
 consensus = data.loc[:, "consensus_structured_wall_avg"]/60
