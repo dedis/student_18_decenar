@@ -87,13 +87,10 @@ func verificationFunctionStructured(msg, data []byte) bool {
 	// check if it is a subset and if the leave is indeed in the consensus
 	// Bloom filter
 	for _, l := range listLeaves {
-		if l == "noscript" || l == "script" {
-			continue
-		}
 		// subset
 		if !consensusSet[l] {
 			log.Lvlf1("consensuSet is not a subset of local leaves set. Missing leave %v\n", l)
-			//return false
+			return false
 		}
 		// consensus Bloom filter
 		if consensusCBF.Count([]byte(l)) == 0 {

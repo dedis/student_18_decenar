@@ -60,7 +60,7 @@ func NewDecrypt(n *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 func (d *Decrypt) Start() error {
 	log.Lvl3("Starting decrypt protocol")
 	// set timeout
-	d.timeout = time.AfterFunc(10*time.Minute, func() {
+	d.timeout = time.AfterFunc(10*time.Hour, func() {
 		log.Lvl1("decrypt protocol timeout")
 		d.finish(false)
 	})

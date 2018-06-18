@@ -72,7 +72,7 @@ func NewConsensusStructuredProtocol(n *onet.TreeNodeInstance) (onet.ProtocolInst
 	}
 
 	// we need big messages
-	network.MaxPacketSize = network.Size(100 * 1024 * 1024)
+	network.MaxPacketSize = network.Size(1000 * 1024 * 1024)
 	return t, nil
 }
 
