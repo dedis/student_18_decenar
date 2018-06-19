@@ -18,7 +18,6 @@ import (
 	"gopkg.in/urfave/cli.v1"
 )
 
-// TODO: these values should probably go in some config file
 // path to the directory where website will be stored for consultation
 const (
 	cachePath = "/tmp/cocache"
@@ -205,6 +204,10 @@ func storeWebPageOnDisk(mUrl string, bData []byte) (string, error) {
 	return filePath, nil
 }
 
+// getFolderAndFilePath parses the URL and returns the corresponding folter
+// path and file path.  Example: url==http://my.example.ext/folder/file.fext
+// will return $cachePath/ext/example/my/folder as folder path and file.fext as
+// filename
 func getFolderAndFilePath(url string) (string, string, error) {
 	u, err := urlpkg.Parse(url)
 	if err != nil {

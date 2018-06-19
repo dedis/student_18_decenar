@@ -14,7 +14,7 @@ const PARALLELIZE = true
 // VPARALLELIZE allows to choose the level of parallelization in the vector computations
 const VPARALLELIZE = 50
 
-// just to avoid changing everywhere, at least for the moment
+// just to avoid changing everywhere
 var SuiTe = decenarch.Suite
 
 // StartParallelize starts parallelization by instanciating number of threads

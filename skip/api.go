@@ -199,6 +199,8 @@ func webstoreExtractAndConvert(webarray []decenarch.Webstore) ([]byte, error) {
 	return b, err
 }
 
+// webstoreCompleteFromBytes reconstructs the webpage and its external
+// resources from the bytes stored in a skipblock
 func webstoreCompleteFromBytes(data []byte) ([]decenarch.Webstore, error) {
 	log.Lvl4("unmarshal webstore - begin")
 	var webs []decenarch.Webstore = make([]decenarch.Webstore, 0)

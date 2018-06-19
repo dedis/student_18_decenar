@@ -88,17 +88,10 @@ func TestHomomorphicOpp(t *testing.T) {
 	cv3 := NewCipherVector(5)
 	cv3.Add(*cv1, *cv2)
 	cv4 := NewCipherVector(5)
-	cv4.Sub(*cv1, *cv2)
-	cv5, _ := EncryptInt(pubKey, 2)
-	cv5.MulCipherTextbyScalar(*cv5, SuiTe.Scalar().SetInt64(2))
 
 	pAdd := DecryptIntVector(secKey, cv3)
-	pSub := DecryptIntVector(secKey, cv4)
-	pMul := DecryptInt(secKey, *cv5)
 
 	require.Equal(t, targetAdd, pAdd)
-	require.Equal(t, targetSub, pSub)
-	require.Equal(t, targetMul, pMul)
 }
 
 // TestAbstractPointsConverter tests the kyber points array converter (to bytes)
@@ -157,41 +150,4 @@ func TestCipherVectorConverter(t *testing.T) {
 	p := DecryptIntVector(secKey, &newCV)
 
 	require.Equal(t, target, p)
-}
-
-// TestIntArrayToCipherVector tests the int array to CipherVector converter and IntToPoint + PointToCiphertext
-func TestIntArrayToCipherVector(t *testing.T) {
-	integers := []int64{1, 2, 3, 4, 5, 6}
-
-	cipherVect := IntArrayToCipherVector(integers)
-	for i, v := range cipherVect {
-		B := SuiTe.Point().Base()
-		i := SuiTe.Scalar().SetInt64(integers[i])
-		M := SuiTe.Point().Mul(i, B)
-		N := SuiTe.Point().Null()
-		require.Equal(t, v.C, M)
-		require.Equal(t, v.K, N)
-	}
-}
-
-func TestB64Serialization(t *testing.T) {
-	secKey, pubKey := GenKey()
-	target := []int64{0, 1, 3, 103, 103}
-	cv, _ := EncryptIntVector(pubKey, target)
-
-	for i, ct := range *cv {
-		ctSerialized := ct.Serialize()
-
-		// with newciphertext
-		ctDeserialized := NewCipherTextFromBase64(ctSerialized)
-		decVal := DecryptInt(secKey, *ctDeserialized)
-		require.Equal(t, target[i], decVal)
-
-		// with deserialize
-		ctDeserializedBis := NewCipherText()
-		ctDeserializedBis.Deserialize(ctSerialized)
-		decValBis := DecryptInt(secKey, *ctDeserializedBis)
-		require.Equal(t, target[i], decValBis)
-		require.Equal(t, decVal, decValBis)
-	}
 }

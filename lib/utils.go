@@ -43,7 +43,7 @@ func NewSharedSecret(dkg *dkg.DistKeyGenerator) (*SharedSecret, error) {
 	}, nil
 }
 
-// DKGSimulate runs an offline version of the DKG protocol.
+// DKGSimulate runs an offline version of the DKG protocol. Used only for tests
 func DKGSimulate(nbrNodes, threshold int) (dkgs []*dkg.DistKeyGenerator, err error) {
 	dkgs = make([]*dkg.DistKeyGenerator, nbrNodes)
 	scalars := make([]kyber.Scalar, nbrNodes)
@@ -149,6 +149,8 @@ func ConcatenateErrors(errs []error) error {
 	return errors.New(strings.Join(errsString, "\n"))
 }
 
+// ReconstructVectorFromPartials performs Lagrange interpolation with the given
+// partial decryptions to reconstruct the jointly encrypted vector
 func ReconstructVectorFromPartials(nodes, threshold int, partials map[int][]kyber.Point) ([]int64, error) {
 	points := make([]kyber.Point, 0)
 	n := nodes

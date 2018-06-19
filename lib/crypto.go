@@ -3,10 +3,7 @@ package lib
 // adapted from https://github.com/lca1/unlynx/blob/master/lib/crypto.go
 
 import (
-	"encoding"
-	"encoding/base64"
 	"fmt"
-	"math/big"
 	"sync"
 
 	"github.com/fanliao/go-concurrentMap"
@@ -41,13 +38,6 @@ func NewCipherText() *CipherText {
 	return &CipherText{K: SuiTe.Point().Null(), C: SuiTe.Point().Null()}
 }
 
-// NewCipherTextFromBase64 creates a ciphertext of null elements.
-func NewCipherTextFromBase64(b64Encoded string) *CipherText {
-	cipherText := &CipherText{K: SuiTe.Point().Null(), C: SuiTe.Point().Null()}
-	(*cipherText).Deserialize(b64Encoded)
-	return cipherText
-}
-
 // NewCipherVector creates a ciphervector of null elements.
 func NewCipherVector(length int) *CipherVector {
 	cv := make(CipherVector, length)
@@ -67,22 +57,12 @@ func GenKey() (secKey kyber.Scalar, pubKey kyber.Point) {
 	return
 }
 
-// GenKeys permits to generate ElGamal public/private key pairs.
-func GenKeys(n int) (kyber.Point, []kyber.Scalar, []kyber.Point) {
-	priv := make([]kyber.Scalar, n)
-	pub := make([]kyber.Point, n)
-	group := SuiTe.Point().Null()
-	for i := 0; i < n; i++ {
-		priv[i], pub[i] = GenKey()
-		group.Add(group, pub[i])
-	}
-	return group, priv, pub
-}
-
 // Encryption
 //______________________________________________________________________________________________________________________
 
-// encryptPoint creates an elliptic curve point from a non-encrypted point and encrypt it using ElGamal encryption.
+// encryptPoint creates an elliptic curve point from a non-encrypted point and
+// encrypt it using ElGamal encryption. Returns also the DLEQ proof used to
+// verify the correctness of the encrypted point
 func encryptPoint(pubkey kyber.Point, M kyber.Point) (*CipherText, *CipherTextProof) {
 	B := SuiTe.Point().Base()
 	k := SuiTe.Scalar().Pick(random.New()) // ephemeral private key
@@ -122,21 +102,14 @@ func IntToCipherText(integer int64) CipherText {
 	return PointToCipherText(IntToPoint(integer))
 }
 
-// IntArrayToCipherVector converts an array of int to a CipherVector
-func IntArrayToCipherVector(integers []int64) CipherVector {
-	result := make(CipherVector, len(integers))
-	for i, v := range integers {
-		result[i] = PointToCipherText(IntToPoint(v))
-	}
-	return result
-}
-
 // EncryptInt encodes i as iB, encrypt it into a CipherText and returns a pointer to it.
 func EncryptInt(pubkey kyber.Point, integer int64) (*CipherText, *CipherTextProof) {
 	return encryptPoint(pubkey, IntToPoint(integer))
 }
 
-// EncryptIntVector encrypts a []int into a CipherVector and returns a pointer to it.
+// EncryptIntVector encrypts a []int into a CipherVector and returns a pointer
+// to it. A vector of DLEQ proofs is also returned to prove the correctness of
+// all the ciphertext
 func EncryptIntVector(pubkey kyber.Point, intArray []int64) (*CipherVector, *CipherVectorProof) {
 	var wg sync.WaitGroup
 	cv := make(CipherVector, len(intArray))
@@ -177,7 +150,8 @@ func DecryptPoint(prikey kyber.Scalar, c CipherText) kyber.Point {
 	return M
 }
 
-// DecryptInt decrypts an integer from an ElGamal cipher text where integer are encoded in the exponent.
+// DecryptInt decrypts an integer from an ElGamal cipher text where integer are
+// encoded in the exponent.
 func DecryptInt(prikey kyber.Scalar, cipher CipherText) int64 {
 	M := DecryptPoint(prikey, cipher)
 	return discreteLog(M, false)
@@ -192,35 +166,7 @@ func DecryptIntVector(prikey kyber.Scalar, cipherVector *CipherVector) []int64 {
 	return result
 }
 
-// PartiallyDecryptIntVector decrypts a cipherVector.
-func PartiallyDecryptIntVector(prikey kyber.Scalar, cipherVector *CipherVector) *CipherVector {
-	result := make(CipherVector, (len(*cipherVector)))
-	for i, c := range *cipherVector {
-		result[i].K = c.K // randomness remains the same
-		result[i].C = DecryptPoint(prikey, c)
-	}
-	return &result
-}
-
-// DecryptInt decrypts an integer from an ElGamal cipher text where integer are encoded in the exponent.
-func DecryptCheckZero(prikey kyber.Scalar, cipher CipherText) int64 {
-	M := DecryptPoint(prikey, cipher)
-	result := int64(1)
-	if M.Equal(SuiTe.Point().Null()) {
-		result = int64(0)
-	}
-	return result
-}
-
-// DecryptIntVectorWithNeg decrypts a cipherVector.
-func DecryptCheckZeroVector(prikey kyber.Scalar, cipherVector *CipherVector) []int64 {
-	result := make([]int64, len(*cipherVector))
-	for i, c := range *cipherVector {
-		result[i] = DecryptCheckZero(prikey, c)
-	}
-	return result
-}
-
+// Brute-force the discrete log go get scalar integer
 func GetPointToInt(P kyber.Point) int64 {
 	return discreteLog(P, false)
 }
@@ -274,12 +220,6 @@ func (c *CipherText) Add(c1, c2 CipherText) {
 	c.K.Add(c1.K, c2.K)
 }
 
-// MulCipherTextbyScalar multiplies two components of a ciphertext by a scalar
-func (c *CipherText) MulCipherTextbyScalar(cMul CipherText, a kyber.Scalar) {
-	c.C = SuiTe.Point().Mul(a, cMul.C)
-	c.K = SuiTe.Point().Mul(a, cMul.K)
-}
-
 // Add two ciphervectors and stores result in receiver.
 func (cv *CipherVector) Add(cv1, cv2 CipherVector) {
 	var wg sync.WaitGroup
@@ -305,35 +245,6 @@ func (cv *CipherVector) Add(cv1, cv2 CipherVector) {
 	}
 }
 
-// Rerandomize rerandomizes an element in a ciphervector at position j, following the Neff SHuffling algorithm
-func (cv *CipherVector) Rerandomize(cv1 CipherVector, a, b kyber.Scalar, ciphert CipherText, g, h kyber.Point, j int) {
-	var tmp1, tmp2 kyber.Point
-	if ciphert.C == nil {
-		//no precomputed value
-		tmp1 = SuiTe.Point().Mul(a, g)
-		tmp2 = SuiTe.Point().Mul(b, h)
-	} else {
-		tmp1 = ciphert.K
-		tmp2 = ciphert.C
-	}
-
-	(*cv)[j].K.Add(cv1[j].K, tmp1)
-	(*cv)[j].C.Add(cv1[j].C, tmp2)
-}
-
-// Sub two ciphertexts and stores result in receiver.
-func (c *CipherText) Sub(c1, c2 CipherText) {
-	c.C.Sub(c1.C, c2.C)
-	c.K.Sub(c1.K, c2.K)
-}
-
-// Sub two cipherVectors and stores result in receiver.
-func (cv *CipherVector) Sub(cv1, cv2 CipherVector) {
-	for i := range cv1 {
-		(*cv)[i].Sub(cv1[i], cv2[i])
-	}
-}
-
 // String returns a string representation of a ciphertext.
 func (c *CipherText) String() string {
 	cstr := "nil"
@@ -345,42 +256,6 @@ func (c *CipherText) String() string {
 		kstr = (*c).K.String()[1:7]
 	}
 	return fmt.Sprintf("CipherText{%s,%s}", kstr, cstr)
-}
-
-// RandomScalarSlice creates a random slice of chosen size
-func RandomScalarSlice(k int) []kyber.Scalar {
-	beta := make([]kyber.Scalar, k)
-	rand := SuiTe.RandomStream()
-	for i := 0; i < k; i++ {
-		beta[i] = SuiTe.Scalar().Pick(rand)
-		//beta[i] = SuiTe.Scalar().Zero() to test without shuffle
-	}
-	return beta
-}
-
-// RandomPermutation shuffles a slice of int
-func RandomPermutation(k int) []int {
-	maxUint := ^uint(0)
-	maxInt := int(maxUint >> 1)
-
-	// Pick a random permutation
-	pi := make([]int, k)
-	rand := SuiTe.RandomStream()
-	for i := 0; i < k; i++ {
-		// Initialize a trivial permutation
-		pi[i] = i
-	}
-	for i := k - 1; i > 0; i-- {
-		randInt := random.Int(big.NewInt(int64(maxInt)), rand)
-		// Shuffle by random swaps
-		j := int(randInt.Int64()) % (i + 1)
-		if j != i {
-			t := pi[j]
-			pi[j] = pi[i]
-			pi[i] = t
-		}
-	}
-	return pi
 }
 
 // Conversion
@@ -429,78 +304,6 @@ func (c *CipherText) FromBytes(data []byte) {
 
 	(*c).K.UnmarshalBinary(data[:32])
 	(*c).C.UnmarshalBinary(data[32:])
-}
-
-// Serialize encodes a CipherText in a base64 string
-func (c *CipherText) Serialize() string {
-	return base64.StdEncoding.EncodeToString((*c).ToBytes())
-}
-
-// Deserialize decodes a CipherText from a base64 string
-func (c *CipherText) Deserialize(b64Encoded string) error {
-	decoded, err := base64.StdEncoding.DecodeString(b64Encoded)
-	if err != nil {
-		log.Error("Invalid CipherText (decoding failed).", err)
-		return err
-	}
-	(*c).FromBytes(decoded)
-	return nil
-}
-
-// SerializeElement serializes a BinaryMarshaller-compatible element using base64 encoding (e.g. kyber.Point or kyber.Scalar)
-func SerializeElement(el encoding.BinaryMarshaler) (string, error) {
-	bytes, err := el.MarshalBinary()
-	if err != nil {
-		log.Error("Error marshalling element.", err)
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(bytes), nil
-}
-
-// SerializePoint serializes a point
-func SerializePoint(point kyber.Point) (string, error) {
-	return SerializeElement(point)
-}
-
-// SerializeScalar serializes a scalar
-func SerializeScalar(scalar encoding.BinaryMarshaler) (string, error) {
-	return SerializeElement(scalar)
-}
-
-// DeserializePoint deserializes a point using base64 encoding
-func DeserializePoint(encodedPoint string) (kyber.Point, error) {
-	decoded, errD := base64.StdEncoding.DecodeString(encodedPoint)
-	if errD != nil {
-		log.Error("Error decoding point.", errD)
-		return nil, errD
-	}
-
-	point := SuiTe.Point()
-	errM := point.UnmarshalBinary(decoded)
-	if errM != nil {
-		log.Error("Error unmarshalling point.", errM)
-		return nil, errM
-	}
-
-	return point, nil
-}
-
-// DeserializeScalar deserializes a scalar using base64 encoding
-func DeserializeScalar(encodedScalar string) (kyber.Scalar, error) {
-	decoded, errD := base64.StdEncoding.DecodeString(encodedScalar)
-	if errD != nil {
-		log.Error("Error decoding scalar.", errD)
-		return nil, errD
-	}
-
-	scalar := SuiTe.Scalar()
-	errM := scalar.UnmarshalBinary(decoded)
-	if errM != nil {
-		log.Error("Error unmarshalling scalar.", errM)
-		return nil, errM
-	}
-
-	return scalar, nil
 }
 
 // AbstractPointsToBytes converts an array of kyber.Point to a byte array

@@ -35,7 +35,8 @@ func init() {
 	onet.GlobalProtocolRegister(NameConsensusStructured, NewConsensusStructuredProtocol)
 }
 
-// SaveLocalState holds the local state of a node when it runs the SaveProtocol
+// ConsensusStructuredState holds the local state of a node when it runs the
+// ConsensusStructuredProcol
 type ConsensusStructuredState struct {
 	*onet.TreeNodeInstance
 	Phase       SavePhase
@@ -98,7 +99,9 @@ func (p *ConsensusStructuredState) Start() error {
 		Url:           p.Url,
 		ParametersCBF: paramCBF,
 	})
+	// if at least one error, returns the concatenation of all the errors
 	if len(errs) > 0 {
+		log.Lvl1("Error when broadcasting message for structured data")
 		return lib.ConcatenateErrors(errs)
 	}
 
@@ -174,6 +177,7 @@ func (p *ConsensusStructuredState) HandleReply(reply []StructSaveReplyStructured
 	log.Lvl4("Consensus reach root, now send complete proofs to all conodes")
 	errs := p.Broadcast(&CompleteProofsAnnounce{p.CompleteProofs})
 	if len(errs) > 0 {
+		log.Lvl1("Error when broadcasting complete proofs")
 		return lib.ConcatenateErrors(errs)
 	}
 
@@ -212,6 +216,8 @@ func (p *ConsensusStructuredState) GetLocalHTMLData() (*html.Node, error) {
 	// apply procedure according to data type
 	contentTypes := resp.Header.Get(http.CanonicalHeaderKey("Content-Type"))
 	p.ContentType = contentTypes
+
+	// handle only correct HTML data
 	if b, e := regexp.MatchString("text/html", contentTypes); b && e == nil && resp.StatusCode == 200 {
 		// procedure for html files (tree-consensus)
 		htmlTree, htmlErr := html.Parse(resp.Body)

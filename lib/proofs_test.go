@@ -24,9 +24,8 @@ func TestCipherVectorProof(t *testing.T) {
 	invalidEncrypted, invalidProof := EncryptIntVector(pair.Public, invalid)
 
 	// verify proofs
-	require.Equal(t, true, validProof.VerifyCipherVectorProof(*validEncrypted))
-	require.Equal(t, false, invalidProof.VerifyCipherVectorProof(*invalidEncrypted))
-
+	require.Equal(t, true, validProof.VerifyCipherVectorProof(validEncrypted))
+	require.Equal(t, false, invalidProof.VerifyCipherVectorProof(invalidEncrypted))
 }
 
 func TestAggregationProof(t *testing.T) {
@@ -53,16 +52,6 @@ func TestAggregationProof(t *testing.T) {
 		log.Print("Adding contribution")
 		tmp.Add(*tmp, *c)
 	}
-	aggregationEncrypted := tmp
-	//falseAggregationEncrypted, _ := EncryptIntVector(pair.Public, []int64{0, 0, 0, 0})
 
-	log.Printf("Decrypted: %#v\n", DecryptIntVector(pair.Private, aggregationEncrypted))
-
-	// create proof
-	//proofCorrect := CreateAggregationiProof(contributions, aggregationEncrypted, 4)
-	//proofIncorrect := CreateAggregationiProof(contributions, falseAggregationEncrypted, 4)
-
-	//require.Equal(t, true, proofCorrect.VerifyAggregationProof())
-	//require.Equal(t, false, proofIncorrect.VerifyAggregationProof())
-
+	log.Printf("Result: %#v\n", tmp)
 }

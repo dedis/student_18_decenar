@@ -657,38 +657,39 @@ func (s *Service) NewProtocol(node *onet.TreeNodeInstance, conf *onet.GenericCon
 	return nil, nil
 }
 
-// completeProofs
+// completeProofs returns complete proofs stored by the conode
 func (s *Service) completeProofs() lib.CompleteProofs {
 	s.Storage.Lock()
 	defer s.Storage.Unlock()
 	return s.Storage.CompleteProofs
 }
 
-// uniqueLeaves
+// uniqueLeaves returns unique leaves stored by the conode
 func (s *Service) uniqueLeaves() []string {
 	return s.Leaves
 }
 
-// latestID
+// latestID returns the ID of the last skipchain block as stored by the conode
 func (s *Service) latestID() skipchain.SkipBlockID {
 	s.Storage.Lock()
 	defer s.Storage.Unlock()
 	return s.Storage.LatestID
 }
 
-// genesisID
+// genesisID returns the ID of the genesis block as stored be the conode
 func (s *Service) genesisID() skipchain.SkipBlockID {
 	s.Storage.Lock()
 	defer s.Storage.Unlock()
 	return s.Storage.GenesisID
 }
 
-// LocalHTMLTree
+// LocalHTMLTree returns the HTML tree resulting from the download of the
+// webpage by the conode
 func (s *Service) localHTMLTree() *html.Node {
 	return s.LocalHTMLTree
 }
 
-// threshold
+// threshold returns the threshold stored by the conode
 func (s *Service) threshold() int32 {
 	s.Storage.Lock()
 	defer s.Storage.Unlock()
@@ -712,6 +713,8 @@ func (s *Service) key() (kyber.Point, error) {
 	return s.Storage.Secret.X, nil
 }
 
+// propagateConsensusFunc is the function executed by the conode when receiving
+// a consensusMessage
 func (s *Service) propagateConsensusFunc(consensusMessage network.Message) {
 	m, ok := consensusMessage.(*ConsensusPropagation)
 	if !ok {
@@ -721,6 +724,8 @@ func (s *Service) propagateConsensusFunc(consensusMessage network.Message) {
 	s.ConsensusPropagation = m
 }
 
+// propagateSetupFunc is the function executed by the conode when receiving a
+// setupMessage
 func (s *Service) propagateSetupFunc(setupMessage network.Message) {
 	m, ok := setupMessage.(*SetupPropagation)
 	if !ok {
@@ -734,7 +739,7 @@ func (s *Service) propagateSetupFunc(setupMessage network.Message) {
 	s.save()
 }
 
-// saves all skipblocks.
+// saves all the the storage data
 func (s *Service) save() {
 	log.Lvl3(s.String(), "Saving Service")
 	s.Storage.Lock()

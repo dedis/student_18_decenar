@@ -39,6 +39,7 @@ func NewBloomFilter(param []uint) *CBF {
 	return &CBF{Set: make([]int64, param[0]), M: param[0], K: param[1]}
 }
 
+// BloomFilterFromSet returns a CBF from a given set, using the given paramters
 func BloomFilterFromSet(set []int64, param []uint) *CBF {
 	return &CBF{Set: set, M: param[0], K: param[1]}
 }
@@ -54,7 +55,6 @@ func GetOptimalCBFParametersToSend(root *html.Node) []uint64 {
 // GetOptimalCBFParametersToSend returns the optimal parameters, i.e. M and K,
 // for the tree rooted by root as []uint type
 func getOptimalCBFParameters(root *html.Node) []uint {
-	// TODO: check if this is the adapted zero value to return
 	if root == nil {
 		return []uint{0, 0}
 	}
@@ -112,36 +112,21 @@ func (c *CBF) Count(e []byte) int64 {
 	return min
 }
 
-func (c *CBF) getParameters() []uint {
-	return []uint{c.M, c.K}
-}
-
-func (c *CBF) SetByte(i uint, value int64) {
-	c.Set[i] = value
-}
-
-func (c *CBF) GetByte(i uint) int64 {
-	return c.Set[i]
-}
-
-func (c *CBF) GetSet() []int64 {
-	if c == nil {
-		return nil
-	}
-
-	return c.Set
-}
-
 // Write writes c to an io.Writer
 func (c *CBF) Write(stream io.Writer) error {
+	// write M
 	err := binary.Write(stream, binary.BigEndian, uint64(c.M))
 	if err != nil {
 		return err
 	}
+
+	// write K
 	err = binary.Write(stream, binary.BigEndian, uint64(c.K))
 	if err != nil {
 		return err
 	}
+
+	// finally write set
 	err = binary.Write(stream, binary.BigEndian, c.Set)
 	if err != nil {
 		return err
@@ -172,7 +157,6 @@ func hashes(e []byte) [2]*big.Int {
 	b.SetBytes(sumBlake[:])
 
 	return [2]*big.Int{a, b}
-
 }
 
 // location returns the ith hashed location using the four base hash values
