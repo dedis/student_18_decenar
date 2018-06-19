@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"bytes"
 	"sync"
 
 	decenarch "github.com/dedis/student_18_decenar"
@@ -30,62 +31,65 @@ type CompleteProof struct {
 // VerifyCompleteProofs verifies all the proofs in the map and returns true if
 // and onyl if all the proofs are correct
 func (p *CompleteProofs) VerifyCompleteProofs() bool {
+	// verify also my proofs, to be sure that root did nothing
+	// wrong
 	for _, v := range *p {
-		// verify also my proofs, to be sure that root did nothing wrong
-		if !v.VerifyCompleteProof() {
+		// for both leaf and non leaf node we verify the signature of the
+		// ciphervector, i.e. the encrypted CBF set. Note that if the node
+		// creating this proof spoof someone's else identity, by using it's
+		// public key, this proof will not work and therefore it will be
+		// rejected.
+		bytesEncryptedSet := v.AggregationProof.Aggregation
+		hashed := decenarch.Suite.Hash().Sum(bytesEncryptedSet)
+		vErr := schnorr.Verify(decenarch.Suite, v.PublicKey, hashed, v.EncryptedCBFSetSignature)
+		if vErr != nil {
+			return false
+		}
+
+		// verify if the node is a leaf
+		tree, err := v.TreeMarshal.MakeTree(v.Roster)
+		if err != nil {
+			return false
+		}
+
+		// verify that the node is really who he claims to be
+		treeNode := tree.Search(v.TreeNodeID)
+		if !treeNode.ServerIdentity.Public.Equal(v.PublicKey) {
+			return false
+		}
+
+		// the node is a leaf
+		isLeaf := len(treeNode.Children) == 0
+
+		// verify that my vector in the aggregation proof is the correct one
+		rootAggregationproof := *((*p)[tree.Root.ServerIdentity.Public.String()].AggregationProof)
+		if bytes.Compare(rootAggregationproof.Contributions[v.PublicKey.String()], v.EncryptedBloomFilter) != 0 {
+			return false
+		}
+
+		// we use the aggregation length since it is the same as the Bloom filter length
+		filter := make(CipherVector, v.AggregationProof.Length)
+		filter.FromBytes(v.EncryptedBloomFilter, v.AggregationProof.Length)
+
+		// if the node responsible of this complete proof is a leaf, we only
+		// have to verify the signature of the ciphervector and the proof that
+		// the ciphervector containts only zeros and ones, since a leaf node is
+		// not responsible of aggregating ciphervectors of other conodes
+		if isLeaf {
+			if !v.CipherVectorProof.VerifyCipherVectorProof(&filter) {
+				return false
+			}
+		}
+
+		// if the node isn't a leaf, we verify all the proofs
+		if !v.AggregationProof.VerifyAggregationProof() && v.CipherVectorProof.VerifyCipherVectorProof(&filter) {
 			return false
 		}
 	}
 	return true
 }
 
-// VerifyCompleteProof verifies the receiving proof
-func (p *CompleteProof) VerifyCompleteProof() bool {
-	// for both leaf and non leaf node we verify the signature of the
-	// ciphervector, i.e. the encrypted CBF set. Note that if the node
-	// creating this proof spoof someone's else identity, by using it's
-	// public key, this proof will not work and therefore it will be
-	// rejected.
-	bytesEncryptedSet := p.AggregationProof.Aggregation
-	hashed := decenarch.Suite.Hash().Sum(bytesEncryptedSet)
-	vErr := schnorr.Verify(decenarch.Suite, p.PublicKey, hashed, p.EncryptedCBFSetSignature)
-	if vErr != nil {
-		return false
-	}
-
-	// verify if the node is a leaf
-	tree, err := p.TreeMarshal.MakeTree(p.Roster)
-	if err != nil {
-		return false
-	}
-
-	// verify that the node is really who he claims to be
-	treeNode := tree.Search(p.TreeNodeID)
-	if !treeNode.ServerIdentity.Public.Equal(p.PublicKey) {
-		return false
-	}
-
-	// the node is a leaf
-	isLeaf := len(treeNode.Children) == 0
-
-	// we use the aggregation length since it is the same as the Bloom filter length
-	filter := make(CipherVector, p.AggregationProof.Length)
-	filter.FromBytes(p.EncryptedBloomFilter, p.AggregationProof.Length)
-
-	// if the node responsible of this complete proof is a leaf, we only
-	// have to verify the signature of the ciphervector and the proof that
-	// the ciphervector containts only zeros and ones, since a leaf node is
-	// not responsible of aggregating ciphervectors of other conodes
-	if isLeaf {
-		return p.CipherVectorProof.VerifyCipherVectorProof(&filter)
-	}
-
-	// if the node isn't a leaf, we verify all the proofs
-	return p.AggregationProof.VerifyAggregationProof() && p.CipherVectorProof.VerifyCipherVectorProof(&filter)
-}
-
 // AggregationProof is the zero knowledge proof used by the leader to prove
-// that the aggregation as been done correctly
 type AggregationProof struct {
 	Contributions map[string][]byte
 	Aggregation   []byte
