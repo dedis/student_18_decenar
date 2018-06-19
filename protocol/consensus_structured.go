@@ -211,12 +211,16 @@ func (p *ConsensusStructuredState) GetLocalHTMLData() (*html.Node, error) {
 		return nil, err
 	}
 	p.Url = realUrl
+	// download indication
+	fmt.Println("   Downloaded HTML page with header at url ", realUrl)
 	defer resp.Body.Close()
 	// apply procedure according to data type
 	contentTypes := resp.Header.Get(http.CanonicalHeaderKey("Content-Type"))
 	p.ContentType = contentTypes
 	if b, e := regexp.MatchString("text/html", contentTypes); b && e == nil && resp.StatusCode == 200 {
 		// procedure for html files (tree-consensus)
+		// parsing indication
+		fmt.Print("   Parse HTML document into HTML tree ")
 		htmlTree, htmlErr := html.Parse(resp.Body)
 		if htmlErr != nil {
 			log.Lvl1("Error: Impossible to parse html code!")
@@ -273,6 +277,7 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 
 	// fill filter with local data
 	p.CountingBloomFilter = lib.NewFilledBloomFilter(param, locTree)
+	fmt.Println("   Created Bloom filter: [", p.CountingBloomFilter.Set[0], p.CountingBloomFilter.Set[1], p.CountingBloomFilter.Set[2], p.CountingBloomFilter.Set[3], "...]")
 	log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 
 	// initialize local proof with useful fields
@@ -317,10 +322,14 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 			hashed := p.Suite().(kyber.HashFactory).Hash().Sum(bytesEncryptedSet)
 			conodeKey := r.TreeNode.ServerIdentity.Public.String()
 			vErr := schnorr.Verify(p.Suite(), r.TreeNode.ServerIdentity.Public, hashed, r.CompleteProofs[conodeKey].EncryptedCBFSetSignature)
+			fmt.Print("   Verify signature and content proof for node with public key ", r.TreeNode.ServerIdentity.Public.String(), "...")
 			if vErr == nil && p.CompleteProofs[conodeKey].CipherVectorProof.VerifyCipherVectorProof(r.EncryptedCBFSet) {
+				lib.GreenPrint("OK\n")
 				log.Lvl4("Valid encrypted CBF set signature for node", r.ServerIdentity.Address)
 				childrenContributions[r.TreeNode.ServerIdentity.Public.String()], _ = r.EncryptedCBFSet.ToBytes()
+				fmt.Print("    Add contribution of node with public key ", r.TreeNode.ServerIdentity.Public.String(), "...")
 				p.EncryptedCBFSet.Add(*p.EncryptedCBFSet, *r.EncryptedCBFSet)
+				lib.GreenPrint("OK\n")
 			} else {
 				log.Lvl1("Invalid signature or content proof for node", r.ServerIdentity.Address)
 				p.Errs = append(p.Errs, vErr)
