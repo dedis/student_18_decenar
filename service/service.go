@@ -103,7 +103,9 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 	s.save()
 
 	// print setup phase
-	lib.YellowPrint("Setup phase\n")
+	lib.YellowPrint("--> Leader <--\n")
+	fmt.Println("")
+	lib.YellowPrint("Setup\n")
 
 	// start a new skipchain only if there isn't one already
 	if s.genesisID() == nil {
@@ -178,7 +180,7 @@ func (s *Service) Setup(req *decenarch.SetupRequest) (*decenarch.SetupResponse, 
 // archive.
 func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveResponse, error) {
 	fmt.Println("")
-	lib.YellowPrint("Store phase with URL: %v\n", req.Url)
+	lib.YellowPrint("Archive webpage with URL: %v\n", req.Url)
 	log.Lvl3("Decenarch Service new SaveWebpage")
 
 	// create the tree
@@ -235,10 +237,12 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 		}
 
 		// reconstruct html page
+		fmt.Printf("\n   Reconstruct HTML page from final Bloom filter...")
 		consensusCBF, msgToSign, err := s.reconstruct(len(req.Roster.List), partials, s.localHTMLTree(), structuredConsensusProtocol.ParametersCBF)
 		if err != nil {
 			return nil, err
 		}
+		lib.GreenPrint("OK\n")
 
 		// propagate consensus result
 		partialsBytes := make(map[int][]byte)
@@ -286,6 +290,7 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 	}
 
 	log.Lvl4("Create stored request")
+	fmt.Printf("\n   Handling additional data...")
 
 	//  run consensus protocol for all additional ressources
 	//var webadds []decenarch.Webstore = make([]decenarch.Webstore, 0)
@@ -347,13 +352,17 @@ func (s *Service) SaveWebpage(req *decenarch.SaveRequest) (*decenarch.SaveRespon
 
 	// add additional data to the slice of storing structures
 	webadds = append(webadds, webmain)
+
+	lib.GreenPrint("OK\n")
 	// send data to the blockchain
+	fmt.Printf("\n   Adding data to skipchain...")
 	log.Lvl4("sending", webadds, "to skipchain")
 	skipclient := skip.NewSkipClient(int(s.threshold()))
 	resp, err := skipclient.SkipAddData(s.genesisID(), req.Roster, webadds)
 	if err != nil {
 		return nil, err
 	}
+	lib.GreenPrint("OK\n")
 
 	// store latest block ID for retrieval
 	s.Storage.Lock()
@@ -518,6 +527,7 @@ func (s *Service) Retrieve(req *decenarch.RetrieveRequest) (*decenarch.RetrieveR
 	returnResp := decenarch.RetrieveResponse{}
 	returnResp.Adds = make([]decenarch.Webstore, 0)
 	skipclient := skip.NewSkipClient(int(s.threshold()))
+	lib.YellowPrint("\nRetrieve webpage with URL: %v and timestamp %v\n", req.Url, req.Timestamp)
 	resp, err := skipclient.SkipGetData(s.latestID(), req.Roster, req.Url, req.Timestamp)
 	if err != nil {
 		return nil, err

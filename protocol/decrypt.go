@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -66,6 +67,7 @@ func (d *Decrypt) Start() error {
 	})
 
 	// broadcast request
+	fmt.Printf("\n   Send encrypted consensus filter to children for decryption\n")
 	errs := d.Broadcast(&PromptDecrypt{
 		EncryptedCBFSet: d.EncryptedCBFSet,
 	})
@@ -82,17 +84,22 @@ func (d *Decrypt) Start() error {
 func (d *Decrypt) HandlePrompt(prompt MessagePromptDecrypt) error {
 	log.Lvl3(d.Name() + ": sending partials to root")
 	defer d.Done()
+	fmt.Println("")
+	fmt.Println("   Received ciphertext for partial decryption from leader")
 
 	// store encrypted CBF set for later verification
 	d.EncryptedCBFSet = prompt.EncryptedCBFSet
 
 	// partially decrypt
+	fmt.Print("   Partially decrypting consensus filter...")
 	partials, proofs := d.getPartials(prompt.EncryptedCBFSet)
+	lib.GreenPrint("OK\n")
 
 	// we can store encrypted filter
 	d.Received <- true
 
 	// send partials to root
+	fmt.Println("   Sending partials to leader")
 	msg := &SendPartial{
 		Partials:       partials,
 		Proofs:         proofs,

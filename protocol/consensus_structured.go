@@ -92,9 +92,11 @@ func (p *ConsensusStructuredState) Start() error {
 
 	// compute and store CBF parameters
 	paramCBF := lib.GetOptimalCBFParametersToSend(tree)
+	fmt.Printf("   Compute optimal parameters for Bloom filters: [%v %v]\n", paramCBF[0], paramCBF[1])
 	p.ParametersCBF = castParametersCBF(paramCBF)
 
 	// send announcement to all conodes
+	fmt.Printf("   Send announcement to all children\n\n")
 	errs := p.Broadcast(&SaveAnnounceStructured{
 		Url:           p.Url,
 		ParametersCBF: paramCBF,
@@ -112,11 +114,12 @@ func (p *ConsensusStructuredState) Start() error {
 // begining and end but each time a different 'case'. Each one can be
 // considered as an independant function.
 func (p *ConsensusStructuredState) HandleAnnounce(msg StructSaveAnnounceStructured) error {
-	lib.YellowPrint("Retrieve phase\n")
+	lib.YellowPrint("Archive\n")
 	log.Lvl4("Handling", p)
 	log.Lvl4("And the message", msg)
 	p.Url = msg.SaveAnnounceStructured.Url
 	fmt.Println("   Received announcement with URL", msg.SaveAnnounceStructured.Url, "and Bloom filter's parameters", msg.SaveAnnounceStructured.ParametersCBF)
+	fmt.Println("")
 
 	// get local version of the webpage
 	tree, err := p.GetLocalHTMLData()
@@ -212,7 +215,7 @@ func (p *ConsensusStructuredState) GetLocalHTMLData() (*html.Node, error) {
 	}
 	p.Url = realUrl
 	// download indication
-	fmt.Println("   Downloaded HTML page with header at url ", realUrl)
+	fmt.Println("   Downloaded HTML page at url", realUrl)
 	defer resp.Body.Close()
 	// apply procedure according to data type
 	contentTypes := resp.Header.Get(http.CanonicalHeaderKey("Content-Type"))
@@ -220,7 +223,7 @@ func (p *ConsensusStructuredState) GetLocalHTMLData() (*html.Node, error) {
 	if b, e := regexp.MatchString("text/html", contentTypes); b && e == nil && resp.StatusCode == 200 {
 		// procedure for html files (tree-consensus)
 		// parsing indication
-		fmt.Print("   Parse HTML document into HTML tree ")
+		fmt.Println("   Parse HTML document into HTML tree ")
 		htmlTree, htmlErr := html.Parse(resp.Body)
 		if htmlErr != nil {
 			log.Lvl1("Error: Impossible to parse html code!")
@@ -277,7 +280,7 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 
 	// fill filter with local data
 	p.CountingBloomFilter = lib.NewFilledBloomFilter(param, locTree)
-	fmt.Println("   Created Bloom filter: [", p.CountingBloomFilter.Set[0], p.CountingBloomFilter.Set[1], p.CountingBloomFilter.Set[2], p.CountingBloomFilter.Set[3], "...]")
+	fmt.Println("   Create Bloom filter: [", p.CountingBloomFilter.Set[0], p.CountingBloomFilter.Set[1], p.CountingBloomFilter.Set[2], p.CountingBloomFilter.Set[3], "...]")
 	log.Lvl4("Filled CBF for node", p.ServerIdentity().Address, "is", p.CountingBloomFilter)
 
 	// initialize local proof with useful fields
@@ -291,7 +294,9 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 
 	// encrypt set of the filter using the collective DKG key and prove
 	// that the set contains only zeros and ones
+	fmt.Print("   Encrypt Bloom filter with key ", p.SharedKey.String(), "i and produce content proof...")
 	localBloomEncrypted, proof := lib.EncryptIntVector(p.SharedKey, p.CountingBloomFilter.Set)
+	lib.GreenPrint("OK\n")
 	p.CompleteProofs[pubKeyString].CipherVectorProof = proof
 	localBloomEncryptedBytes, _ := localBloomEncrypted.ToBytes()
 	p.CompleteProofs[pubKeyString].EncryptedBloomFilter = localBloomEncryptedBytes
@@ -301,6 +306,7 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 	childrenContributions[pubKeyString] = localBloomEncryptedBytes
 	p.EncryptedCBFSet = localBloomEncrypted
 	if !p.IsLeaf() {
+		fmt.Println("")
 		for _, r := range reply {
 			// convert child contribution to bytes
 			bytesEncryptedBloomFilter, _ := r.EncryptedCBFSet.ToBytes()
@@ -335,6 +341,7 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 				p.Errs = append(p.Errs, vErr)
 			}
 		}
+		fmt.Println("")
 	}
 
 	// store sum of all contributions plus the local contribution of the conode
@@ -350,11 +357,13 @@ func (p *ConsensusStructuredState) AggregateCBF(locTree *html.Node, reply []Stru
 	// into account the addition for the non leaf nodes. If the node isn't
 	// a leaf, we skip the addition part, so no problem in signing the
 	// encrypted Bloom filter here
+	fmt.Print("   Sign encrypted filter...")
 	sig, err := p.signEncryptedCBFSet()
 	if err != nil {
 		return err
 	}
 	p.CompleteProofs[pubKeyString].EncryptedCBFSetSignature = sig
+	lib.GreenPrint("OK\n")
 
 	return nil
 }

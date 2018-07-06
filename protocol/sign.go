@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"bytes"
+	"fmt"
+	"time"
 
 	"golang.org/x/net/html"
 	"gopkg.in/dedis/kyber.v2"
@@ -79,6 +81,16 @@ func verificationFunctionStructured(msg, data []byte) bool {
 		consensusSet[l] = true
 	}
 
+	// get complete proofs
+	completeProofs := vfData.(*VerificationData).CompleteProofs
+
+	// get conode and root keys
+	// verify all the proofs of the protocol
+	if !completeProofs.VerifyCompleteProofs() {
+		return false
+	}
+
+	fmt.Print("    Verify leader's work...")
 	// get consensus Bloom filter
 	consensusBloomSet := vfData.(*VerificationData).ConsensusSet
 	consensusParameters := vfData.(*VerificationData).ConsensusParameters
@@ -102,16 +114,6 @@ func verificationFunctionStructured(msg, data []byte) bool {
 			return false
 		}
 	}
-
-	// get complete proofs
-	completeProofs := vfData.(*VerificationData).CompleteProofs
-
-	// get conode and root keys
-	// verify all the proofs of the protocol
-	if !completeProofs.VerifyCompleteProofs() {
-		return false
-	}
-
 	// check that root did a correct job, aka audit the leader
 	conodeKey := vfData.(*VerificationData).ConodeKey
 	rootKey := vfData.(*VerificationData).RootKey
@@ -145,6 +147,10 @@ func verificationFunctionStructured(msg, data []byte) bool {
 			}
 		}
 	}
+	time.Sleep(2 * time.Second)
+	lib.GreenPrint("OK\n")
+
+	fmt.Println("   Verification function returned true, sign the HTML document")
 
 	return true
 }

@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"fmt"
 	"sync"
 
 	decenarch "github.com/dedis/student_18_decenar"
@@ -26,6 +27,8 @@ type CompleteProof struct {
 }
 
 func (p *CompleteProofs) VerifyCompleteProofs() bool {
+	fmt.Println("")
+	fmt.Println("   Start verification function")
 	for _, v := range *p {
 		// verify also my proofs, to be sure that root did nothing wrong
 		if !v.VerifyCompleteProof() {
@@ -37,6 +40,7 @@ func (p *CompleteProofs) VerifyCompleteProofs() bool {
 }
 
 func (p *CompleteProof) VerifyCompleteProof() bool {
+	fmt.Print("    Verify complete proofs of node ", p.PublicKey.String(), "...")
 	// for both leaf and non leaf node we verify the signature of the
 	// ciphervector, i.e. the encrypted CBF set. Note that if the node creating this proof spoof someone's else identity, by using it's public key, this proof will not work and therefore it will be rejected.
 	//bytesEncryptedSet, _ := p.AggregationProof.Aggregation.ToBytes()
@@ -71,11 +75,14 @@ func (p *CompleteProof) VerifyCompleteProof() bool {
 	// the ciphervector containts only zeros and ones, since a leaf node is
 	// not responsible of aggregating ciphervectors of other conodes
 	if isLeaf {
+		GreenPrint("OK\n")
 		return p.CipherVectorProof.VerifyCipherVectorProof(&filter)
 	}
 
 	// if the node isn't a leaf, we verify all the proofs
-	return p.AggregationProof.VerifyAggregationProof() && p.CipherVectorProof.VerifyCipherVectorProof(&filter)
+	outcome := p.AggregationProof.VerifyAggregationProof() && p.CipherVectorProof.VerifyCipherVectorProof(&filter)
+	GreenPrint("OK\n")
+	return outcome
 }
 
 type AggregationProof struct {
