@@ -147,7 +147,7 @@ func verificationFunctionStructured(msg, data []byte) bool {
 			}
 		}
 	}
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	lib.GreenPrint("OK\n")
 
 	fmt.Println("   Verification function returned true, sign the HTML document")
